@@ -134,8 +134,8 @@ def friendly_message(message):
 def band_hero_to_volca_beats(midi_input, midi_output):
     conv = [[BH_BASS, VB_KICK],
             [BH_RED_TOM, VB_SNARE],
-            [BH_BLUE_TOM, VB_LO_TOM],
-            [BH_GREEN_TOM, VB_HI_TOM],
+            [BH_BLUE_TOM, VB_HI_TOM],
+            [BH_GREEN_TOM, VB_LO_TOM],
             [BH_YELLOW_HI, VB_OP_HAT],
             [BH_ORANGE_HI, VB_CL_HAT]]
     in_channel = BH_CHANNEL
