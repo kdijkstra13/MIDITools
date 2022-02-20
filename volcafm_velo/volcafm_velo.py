@@ -26,7 +26,7 @@ import sys
 import signal
 
 def close(code, frame):
-    print("Terminating MCMT.")
+    print("Terminating.")
     sys.exit(0)
 
 use_fm = False
