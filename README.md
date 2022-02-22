@@ -15,7 +15,7 @@ The transcoder currently has these capabilities:
 2) Transcode incoming messages to other messages
 3) Transcode Guitar Hero Drums to Korg Volca Beats
 4) Transcode Guitar Hero Drums to Electron Model Cycles
-5) Round robin MIDI
+5) Round robin channel MIDI, create polyphonic synth from the Electron Model Cycles
 
 * Platform: Windows (PyGame.midi)
 * ./transcoder/transcoder.py - Python script converting MIDI messages and monitoring MIDI messages.
