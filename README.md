@@ -8,8 +8,14 @@ Adds note velocity for the KORG Volca FM by prepending a velocity message to the
 * ./volcafm_velo/volcafm_velo.py - Python script for starting the Jack port.
 * ./volcafm_velo/volcafm_velo.sh - Shell script to connect a Jack MIDI input via the transcoder to a Jack MIDI output.
 
-# Band Hero to Volca Beats
-Converts notes send by the Wii Band Hero Drums to the Korg Volca Beats.
+# MIDI Transcoder
+The transcoder currently has these capabilities:
+
+1) View incoming MIDI messages
+2) Transcode incoming messages to other messages
+3) Transcode Guitar Hero Drums to Korg Volca Beats
+4) Transcode Guitar Hero Drums to Electron Model Cycles
+5) Round robin MIDI
 
 * Platform: Windows (PyGame.midi)
-* ./monitor/monitor.py - Python script converting MIDI messages and monitoring MIDI messages.
+* ./transcoder/transcoder.py - Python script converting MIDI messages and monitoring MIDI messages.

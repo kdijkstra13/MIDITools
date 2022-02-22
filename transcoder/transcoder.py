@@ -15,10 +15,12 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 
-drClass' MIDI Monitor
-View incoming MIDI messages
-Convert incoming messages to other messages
-Convert Guitar Hero Drums to Volca Beats
+drClass' MIDI Transcoder
+
+1) View incoming MIDI messages
+2) Transcode incoming messages to other messages
+3) Transcode Guitar Hero Drums to Korg Volca Beats
+4) Transcode Guitar Hero Drums to Electron Model Cycles
 """
 import sys
 import time
@@ -32,7 +34,7 @@ NOTE_OFF = 0x8
 NOTE_AT = 0xD
 
 # Band hero drums
-BH_CHANNEL = 9
+BH_CHANNEL = 8
 BH_BASS = 16
 BH_RED_TOM = 38
 BH_BLUE_TOM = 48
@@ -51,13 +53,13 @@ VB_OP_HAT = 46
 VB_CLAP = 39
 
 
-def transcode_message(message, conv, in_channel, out_channel):
+def transcode_message(message, conv):
     timestamp, channel, cmd, note, velo = decode_message(message)
     result = message
-    if cmd in [NOTE_ON, NOTE_OFF] and channel == in_channel:
-        for note_from, note_to in conv:
-            if note == note_from:
-                result = encode_message(timestamp, out_channel, cmd, note_to, velo)
+    if cmd in [NOTE_ON, NOTE_OFF]:
+        for channel_from, note_from, channel_to, note_to in conv:
+            if note == note_from and channel == channel_from:
+                result = encode_message(timestamp, channel_to, cmd, note_to, velo)
     return result
 
 
@@ -131,21 +133,59 @@ def friendly_message(message):
     return msg
 
 
-def band_hero_to_volca_beats(midi_input, midi_output):
-    conv = [[BH_BASS, VB_KICK],
-            [BH_RED_TOM, VB_SNARE],
-            [BH_BLUE_TOM, VB_HI_TOM],
-            [BH_GREEN_TOM, VB_LO_TOM],
-            [BH_YELLOW_HI, VB_OP_HAT],
-            [BH_ORANGE_HI, VB_CL_HAT]]
-    in_channel = BH_CHANNEL
-    out_channel = VB_CHANNEL
+def message_transcode_loop(midi_input, midi_output, conv):
     while True:
         if midi_input.poll():
             in_message = midi_input.read(1)[0]
-            out_message = transcode_message(in_message, conv, in_channel, out_channel)
+            out_message = transcode_message(in_message, conv)
             midi_output.write([out_message])
             print(f"{friendly_message(in_message)} -> {friendly_message(out_message)}")
+
+
+def band_hero_to_volca_beats(midi_input, midi_output):
+    conv = [[BH_CHANNEL, BH_BASS,      VB_CHANNEL, VB_KICK],
+            [BH_CHANNEL, BH_RED_TOM,   VB_CHANNEL, VB_SNARE],
+            [BH_CHANNEL, BH_BLUE_TOM,  VB_CHANNEL, VB_HI_TOM],
+            [BH_CHANNEL, BH_GREEN_TOM, VB_CHANNEL, VB_LO_TOM],
+            [BH_CHANNEL, BH_YELLOW_HI, VB_CHANNEL, VB_OP_HAT],
+            [BH_CHANNEL, BH_ORANGE_HI, VB_CHANNEL, VB_CL_HAT]]
+    message_transcode_loop(midi_input, midi_output, conv)
+
+
+def band_hero_to_electron_cycles(midi_input, midi_output):
+    conv = [[BH_CHANNEL, BH_BASS,      0, full_note_to_number("C4")],
+            [BH_CHANNEL, BH_RED_TOM,   1, full_note_to_number("C4")],
+            [BH_CHANNEL, BH_BLUE_TOM,  2, full_note_to_number("C4")],
+            [BH_CHANNEL, BH_GREEN_TOM, 3, full_note_to_number("C4")],
+            [BH_CHANNEL, BH_YELLOW_HI, 4, full_note_to_number("C4")],
+            [BH_CHANNEL, BH_ORANGE_HI, 5, full_note_to_number("C4")]]
+    message_transcode_loop(midi_input, midi_output, conv)
+
+
+def round_robin_notes(midi_input, midi_output, in_channel, out_channels, echo_other=True):
+    idx = 0
+    note_state = {}
+    while True:
+        if midi_input.poll():
+            in_message = midi_input.read(1)[0]
+            timestamp, chan, cmd, byte1, byte2 = decode_message(in_message)
+            if chan == in_channel and cmd in [NOTE_ON, NOTE_OFF]:
+                if cmd == NOTE_ON:
+                    out_message = encode_message(timestamp, out_channels[idx], cmd, byte1, byte2)
+                    state, oct, note, _ = decode_note_message(cmd, byte1, byte2)
+                    note_state[f"{note}{oct}"] = out_channels[idx]  # remember which channel to note belongs to
+                    idx = (idx + 1 if idx < len(out_channels) - 1 else 0)
+                else:
+                    state, oct, note, _ = decode_note_message(cmd, byte1, byte2)
+                    out_channel = note_state[f"{note}{oct}"]
+                    out_message = encode_message(timestamp, out_channel, cmd, byte1, byte2)
+                    del note_state[f"{note}{oct}"]
+
+                midi_output.write([out_message])
+                print(f"{friendly_message(in_message)} -> {friendly_message(out_message)}")
+                print(note_state)
+            elif echo_other:
+                midi_output.write([in_message])
 
 
 def number_to_note(number):
@@ -159,6 +199,18 @@ def number_to_octave(number):
 
 def number_to_full_note(number):
     return f"{number_to_note(number)}{number_to_octave(number)}"
+
+
+def full_note_to_number(note: str):
+    notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    if note[1] == '#':
+        note = note[:2]
+        oct = note[2:]
+    else:
+        note = note[0]
+        oct = int(note[1:])
+    number = oct * 12 + notes.index(note)
+    return number
 
 
 if __name__ == "__main__":
@@ -176,6 +228,20 @@ if __name__ == "__main__":
 
     print(f"Chosen input: {input_device['name']}")
     print(f"Chosen output: {output_device['name']}")
+
+    # Simple MIDI monitor
     # monitor_inputs(midi.Input(input_device["idx"]))
-    band_hero_to_volca_beats(midi.Input(input_device["idx"]),
-                             midi.Output(output_device["idx"]))
+
+    # Transcode Band Hero to Volca Beats
+    # band_hero_to_volca_beats(midi.Input(input_device["idx"]),
+    #                          midi.Output(output_device["idx"]))
+
+    # Transcode Band Hero to Model Cycles
+    # band_hero_to_electron_cycles(midi.Input(input_device["idx"]),
+    #                              midi.Output(output_device["idx"]))
+
+    # Round robin notes to create a polyphonic Model Cycles
+    round_robin_notes(midi.Input(input_device["idx"]),
+                      midi.Output(output_device["idx"]),
+                      in_channel=8,
+                      out_channels=[0, 1, 2, 3])
