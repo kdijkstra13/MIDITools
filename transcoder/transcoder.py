@@ -34,7 +34,7 @@ NOTE_OFF = 0x8
 NOTE_AT = 0xD
 
 # Band hero drums
-BH_CHANNEL = 8
+BH_CHANNEL = 9
 BH_BASS = 16
 BH_RED_TOM = 38
 BH_BLUE_TOM = 48
@@ -153,12 +153,12 @@ def band_hero_to_volca_beats(midi_input, midi_output):
 
 
 def band_hero_to_electron_cycles(midi_input, midi_output):
-    conv = [[BH_CHANNEL, BH_BASS,      0, full_note_to_number("C4")],
-            [BH_CHANNEL, BH_RED_TOM,   1, full_note_to_number("C4")],
-            [BH_CHANNEL, BH_BLUE_TOM,  2, full_note_to_number("C4")],
-            [BH_CHANNEL, BH_GREEN_TOM, 3, full_note_to_number("C4")],
-            [BH_CHANNEL, BH_YELLOW_HI, 4, full_note_to_number("C4")],
-            [BH_CHANNEL, BH_ORANGE_HI, 5, full_note_to_number("C4")]]
+    conv = [[BH_CHANNEL, BH_BASS,      0, full_note_to_number("C5")],
+            [BH_CHANNEL, BH_RED_TOM,   1, full_note_to_number("C5")],
+            [BH_CHANNEL, BH_BLUE_TOM,  2, full_note_to_number("C5")],
+            [BH_CHANNEL, BH_GREEN_TOM, 3, full_note_to_number("C5")],
+            [BH_CHANNEL, BH_YELLOW_HI, 4, full_note_to_number("C5")],
+            [BH_CHANNEL, BH_ORANGE_HI, 5, full_note_to_number("C5")]]
     message_transcode_loop(midi_input, midi_output, conv)
 
 
@@ -201,14 +201,14 @@ def number_to_full_note(number):
     return f"{number_to_note(number)}{number_to_octave(number)}"
 
 
-def full_note_to_number(note: str):
+def full_note_to_number(full_note: str):
     notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-    if note[1] == '#':
-        note = note[:2]
-        oct = note[2:]
+    if full_note[1] == '#':
+        note = full_note[:2]
+        oct = full_note[2:]
     else:
-        note = note[0]
-        oct = int(note[1:])
+        note = full_note[0]
+        oct = int(full_note[1:])
     number = oct * 12 + notes.index(note)
     return number
 
@@ -233,15 +233,15 @@ if __name__ == "__main__":
     # monitor_inputs(midi.Input(input_device["idx"]))
 
     # Transcode Band Hero to Volca Beats
-    # band_hero_to_volca_beats(midi.Input(input_device["idx"]),
-    #                          midi.Output(output_device["idx"]))
+    band_hero_to_volca_beats(midi.Input(input_device["idx"]),
+                             midi.Output(output_device["idx"]))
 
     # Transcode Band Hero to Model Cycles
     # band_hero_to_electron_cycles(midi.Input(input_device["idx"]),
     #                              midi.Output(output_device["idx"]))
 
     # Round robin notes to create a polyphonic Model Cycles
-    round_robin_notes(midi.Input(input_device["idx"]),
-                      midi.Output(output_device["idx"]),
-                      in_channel=8,
-                      out_channels=[0, 1, 2, 3])
+    # round_robin_notes(midi.Input(input_device["idx"]),
+    #                   midi.Output(output_device["idx"]),
+    #                   in_channel=8,
+    #                   out_channels=[0, 1, 2, 3])
