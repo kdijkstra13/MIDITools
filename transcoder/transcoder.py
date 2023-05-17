@@ -142,13 +142,20 @@ def message_transcode_loop(midi_input, midi_output, conv):
             print(f"{friendly_message(in_message)} -> {friendly_message(out_message)}")
 
 
+def message_copy_loop(midi_input, midi_output):
+    while True:
+        if midi_input.poll():
+            message = midi_input.read(1)[0]
+            midi_output.write([message])
+            print(f"{friendly_message(message)}")
+
 def band_hero_to_volca_beats(midi_input, midi_output):
     conv = [[BH_CHANNEL, BH_BASS,      VB_CHANNEL, VB_KICK],
             [BH_CHANNEL, BH_RED_TOM,   VB_CHANNEL, VB_SNARE],
             [BH_CHANNEL, BH_BLUE_TOM,  VB_CHANNEL, VB_HI_TOM],
             [BH_CHANNEL, BH_GREEN_TOM, VB_CHANNEL, VB_LO_TOM],
-            [BH_CHANNEL, BH_YELLOW_HI, VB_CHANNEL, VB_OP_HAT],
-            [BH_CHANNEL, BH_ORANGE_HI, VB_CHANNEL, VB_CL_HAT]]
+            [BH_CHANNEL, BH_YELLOW_HI, VB_CHANNEL, VB_CL_HAT],
+            [BH_CHANNEL, BH_ORANGE_HI, VB_CHANNEL, VB_OP_HAT]]
     message_transcode_loop(midi_input, midi_output, conv)
 
 
@@ -231,6 +238,10 @@ if __name__ == "__main__":
 
     # Simple MIDI monitor
     # monitor_inputs(midi.Input(input_device["idx"]))
+
+    # Copy Input to Output
+    # message_copy_loop(midi.Input(input_device["idx"]),
+    #                   midi.Output(output_device["idx"]))
 
     # Transcode Band Hero to Volca Beats
     band_hero_to_volca_beats(midi.Input(input_device["idx"]),
