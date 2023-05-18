@@ -26,6 +26,8 @@ def create_midi(track_names: List[str], tempo=120) -> MIDIFile:
 
 
 def note_to_pitch(note: str, oct=None) -> Tuple[int, int]:
+    if note == "X":
+        return 0, 0
     if len(note) == 1 or (note[1] != "b" and note[1] != "#"):
         pitch = NOTES[note[:1]]
         if len(note) == 2:
@@ -83,13 +85,14 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                     d_list[-(i+1)] += 1
             tick += 1
     for i, (tick, pitch, duration) in enumerate(zip(t_list, p_list, d_list)):
-        mf.addNote(track=track, channel=0, pitch=pitch, time=tick, duration=duration, volume=100)
+        if pitch != 0:  # rest
+            mf.addNote(track=track, channel=0, pitch=pitch, time=tick, duration=duration, volume=100)
 
 
-def create(num, den, sign, scale):
+def create(num, den, sign, scale, tempo):
     translate = {2:1, 4:2, 8:3, 16:4}
     den = translate[den]
-    mf = create_midi(["right_hand", "left_hand"], tempo=70)
+    mf = create_midi(["right_hand", "left_hand"], tempo=tempo)
     mf.addTimeSignature(track=0, time=0, numerator=num, denominator=den, clocks_per_tick=32, notes_per_quarter=8)
     mf.addKeySignature(track=0, time=0, accidentals=1, accidental_type=sign, mode=scale)
     mf.addTimeSignature(track=1, time=0, numerator=num, denominator=den, clocks_per_tick=32, notes_per_quarter=8)
