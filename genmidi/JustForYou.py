@@ -31,7 +31,7 @@ Adim = "Eb3+Gb3+A3+C4"
 Bes = "D3+F3+Bb3"
 Besmaj7 = "D3+F3+A3"
 Bes7 = "D3+F3+Ab3"
-Bdim = "D3+F3+A3+B3"
+Bdim = "D3+F3+Ab3+B3"
 
 C7 = "E3+G3+Bb3+C4"
 C7a = "G3+Bb3+C4+E4"
@@ -44,7 +44,7 @@ D7 = "D3+F#3+A3+C4"
 Es7 = "Eb3+G3+Bb3+Db4"
 
 Fmaj7 = "F3+A3+C4+E4"
-F7 = "E3+F3+A3+C4"
+F7 = "Eb3+F3+A3+C4"
 Fisdim = "F#3+A3+C4+Eb4"
 F6 = "F3+A3+C4+D4"
 
