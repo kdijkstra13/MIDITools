@@ -44,14 +44,20 @@ class UI:
         input_label = tk.Label(self.root, text="Input MIDI Channel")
         split_begin_label = tk.Label(self.root, text="Split Begin Note")
         split_end_label = tk.Label(self.root, text="Split End Note")
+        transpose_up_label = tk.Label(self.root, text="Transpose Up")
+        transpose_value_label = tk.Label(self.root, text="Current Transpose Value")
+        transpose_down_label = tk.Label(self.root, text="Transpose Down")
         output_label = tk.Label(self.root, text="Output MIDI Channel")
         thru_label = tk.Label(self.root, text="Thru MIDI Channels")
 
         input_label.grid(row=0, column=0, columnspan=8)
         split_begin_label.grid(row=1, column=0, columnspan=8)
         split_end_label.grid(row=2, column=0, columnspan=8)
-        output_label.grid(row=3, column=0, columnspan=8)
-        thru_label.grid(row=4, column=0, columnspan=8)
+        transpose_up_label.grid(row=3, column=0, columnspan=8)
+        transpose_value_label.grid(row=4, column=0, columnspan=8)
+        transpose_down_label.grid(row=5, column=0, columnspan=8)
+        output_label.grid(row=6, column=0, columnspan=8)
+        thru_label.grid(row=7, column=0, columnspan=8)
 
         self.on_font = font.Font(size=14)
         self.other_color = "#7b7c8a"
@@ -64,11 +70,11 @@ class UI:
         # Buttons
         self.init_button = tk.Button(self.root, text="Init", font=self.on_font, bg=self.other_color, fg="white",
                                      width=8, height=1)
-        self.init_button.grid(row=5, column=0, columnspan=8)
+        self.init_button.grid(row=8, column=0, columnspan=8)
 
         self.show_button = tk.Button(self.root, text="Show", font=self.on_font, bg=self.other_color, fg="white",
                                      width=8, height=1)
-        self.show_button.grid(row=5, column=3, columnspan=8)
+        self.show_button.grid(row=9, column=0, columnspan=8)
 
         # Create arrays to store checkbox variables
         self.input_buttons = []
@@ -78,8 +84,10 @@ class UI:
         self.split_begin_button_id = None
         self.split_end_button_id = None
         self.thru_buttons = []
+        self.transpose = [0] * 16
+        self.transpose_label = []
 
-        for r, t in zip([0, 3, 4], ["input", "output", "thru"]):
+        for r, t in zip([0, 6, 7], ["input", "output", "thru"]):
             all_button = tk.Button(self.root, text="On", width=4, height=2,
                                    command=lambda x=t: self.on_all(x, "on"), font=self.on_font,
                                    bg=self.other_color, fg="white")
@@ -90,6 +98,7 @@ class UI:
                                    bg=self.other_color, fg="white")
             all_button.grid(row=r, column=9, padx=5, pady=5)
 
+        # Split set buttons
         self.split_begin_set_button = tk.Button(self.root, text="Set", width=4, height=2,
                                                 command=lambda x="split_begin": self.on_set_split(x, "set"),
                                                 font=self.on_font,
@@ -101,8 +110,24 @@ class UI:
                                               font=self.on_font,
                                               bg=self.other_color, fg="white")
         self.split_end_set_button.grid(row=2, column=8, padx=5, pady=5)
+
+        # Transpose set buttons
+        self.transpose_semitone_button = tk.Button(self.root, text="Semi", width=4, height=2,
+                                                   command=lambda x="semitone": self.on_transpose_mode(),
+                                                   font=self.on_font,
+                                                   bg=self.split_off_color, fg="black", relief="raised")
+        self.transpose_semitone_button.grid(row=4, column=8, padx=5, pady=5)
+
+        self.transpose_octave_button = tk.Button(self.root, text="Oct", width=4, height=2,
+                                                 command=lambda x="octave": self.on_transpose_mode(),
+                                                 font=self.on_font,
+                                                 bg=self.split_on_color, fg="white", relief="sunken")
+        self.transpose_octave_button.grid(row=4, column=9, padx=5, pady=5)
+
+
         # Create and place checkboxes for input and output channels
         for i in range(16):
+            # Input buttons
             input_button = tk.Button(self.root, text=str(i + 1), width=4, height=2,
                                      command=lambda m=i: self.on_click(m, "input"), font=self.on_font,
                                      bg=self.on_color, fg="white")
@@ -110,30 +135,51 @@ class UI:
             input_button.grid(row=0, column=i + 10, padx=5, pady=5)
             input_button.config(relief="sunken")
 
+            # Split begin buttons
             split_begin_button = tk.Button(self.root, text="X", width=4, height=2,
                                            command=lambda m=i: self.on_click(m, "split_begin"), font=self.on_font,
                                            bg=self.split_off_color, fg="black")
             self.split_begin_buttons.append(split_begin_button)
             split_begin_button.grid(row=1, column=i + 10)
 
+            # Split end buttons
             split_end_button = tk.Button(self.root, text="X", width=4, height=2,
                                          command=lambda m=i: self.on_click(m, "split_end"), font=self.on_font,
                                          bg=self.split_off_color, fg="black")
             self.split_end_buttons.append(split_end_button)
             split_end_button.grid(row=2, column=i + 10)
 
+            # Transpose + buttons
+            transpose_up_button = tk.Button(self.root, text="+", width=4, height=2,
+                                            command=lambda m=i: self.on_click(m, "transpose_up"), font=self.on_font,
+                                            bg=self.other_color, fg="white")
+            transpose_up_button.grid(row=3, column=i + 10)
+
+            # Transpose label
+            transpose_value_label = tk.Label(self.root, text="0", font=font.Font(size=20))
+            transpose_value_label.grid(row=4, column=i + 10)
+            self.transpose_label.append(transpose_value_label)
+
+            # Transpose - buttons
+            transpose_down_button = tk.Button(self.root, text="-", width=4, height=2,
+                                              command=lambda m=i: self.on_click(m, "transpose_down"), font=self.on_font,
+                                              bg=self.other_color, fg="white")
+            transpose_down_button.grid(row=5, column=i + 10)
+
+            # Output buttons
             output_button = tk.Button(self.root, text=str(i + 1), width=4, height=2,
                                       command=lambda m=i: self.on_click(m, "output"), font=self.on_font,
                                       bg=self.off_color, fg="black")
             self.output_buttons.append(output_button)
-            output_button.grid(row=3, column=i + 10)
+            output_button.grid(row=6, column=i + 10)
 
+            # Through buttons
             thru_button = tk.Button(self.root, text=str(i + 1), width=4, height=2,
                                     command=lambda m=i: self.on_click(m, "thru"), font=self.on_font,
                                     bg=self.on_color, fg="white")
             thru_button.config(relief="sunken")
             self.thru_buttons.append(thru_button)
-            thru_button.grid(row=4, column=i + 10)
+            thru_button.grid(row=7, column=i + 10)
 
     def on_all(self, button_type, switch):
         if button_type == "input":
@@ -163,6 +209,14 @@ class UI:
                 else:
                     self.split_end_buttons[self.split_end_button_id].config(bg=self.split_off_color)
                 self.split_end_button_id = None
+
+    def on_transpose_mode(self):
+        if self.transpose_semitone_button.cget("relief") == "sunken":
+            self.transpose_semitone_button.config(relief="raised", bg=self.split_off_color, fg="black")
+            self.transpose_octave_button.config(relief="sunken", bg=self.split_on_color, fg="white")
+        else:
+            self.transpose_semitone_button.config(relief="sunken", bg=self.split_on_color, fg="white")
+            self.transpose_octave_button.config(relief="raised", bg=self.split_off_color, fg="black")
 
     def on_set_split(self, button_type, switch):
         if button_type == "split_begin" and switch == "set":
@@ -201,6 +255,12 @@ class UI:
                         self.split_end_buttons[button_id].config(relief="raised", bg=self.split_off_color, fg="black")
                     else:
                         self.split_end_buttons[button_id].config(relief="sunken", bg=self.split_on_color, fg="white")
+        elif button_type in ["transpose_up", "transpose_down"]:
+            if button_type == "transpose_up":
+                self.transpose[button_id] += 1
+            if button_type == "transpose_down":
+                self.transpose[button_id] -= 1
+            self.transpose_label[button_id].config(text=f"{self.transpose[button_id]}")
         else:
             if button_type == "input":
                 button = self.input_buttons[button_id]
@@ -268,17 +328,19 @@ class Messages:
                 if self.ui.split_begin_button_id is not None:
                     self.ui.split_begin_buttons[self.ui.split_begin_button_id].config(text=number_to_full_note(note))
                     self.ui.disable_split_button("split_begin")
+                    self.ui.on_set_split("split_begin", "set")
                     self.ui.split_begin_button_id = None
                 if self.ui.split_end_button_id is not None:
                     self.ui.split_end_buttons[self.ui.split_end_button_id].config(text=number_to_full_note(note))
                     self.ui.disable_split_button("split_end")
+                    self.ui.on_set_split("split_end", "set")
                     self.ui.split_end_button_id = None
 
                 # Fetch and forward note
                 if cmd in [NOTE_ON, NOTE_OFF] and self.ui.input_buttons[channel].cget("relief") == "sunken":
                     for i in range(16):
                         if self.ui.output_buttons[i].cget("relief") == "sunken":
-                            min_note = -1
+                            min_note = 0
                             if self.ui.split_begin_buttons[i].cget("relief") == "sunken":
                                 note_name = self.ui.split_begin_buttons[i].cget("text")
                                 if note_name != "X":
@@ -288,7 +350,11 @@ class Messages:
                                 note_name = self.ui.split_end_buttons[i].cget("text")
                                 if note_name != "X":
                                     max_note = full_note_to_number(note_name)
-                            if note > min_note and note <= max_note:
+                            if min_note <= note < max_note:
+                                if self.ui.transpose_octave_button.cget("relief") == "sunken":
+                                    note += self.ui.transpose[i] * 12
+                                else:
+                                    note += self.ui.transpose[i]
                                 output_message = encode_message(timestamp, i, cmd, note, velo)
                                 self.midi_output.write([output_message])
                                 print(f"Forward: {friendly_message(message)} -> {friendly_message(output_message)}")
