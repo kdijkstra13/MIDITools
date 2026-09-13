@@ -53,7 +53,7 @@ The most important symbols are:
 | `_` | Carry/hold the complete previous event |
 | `-` | Rest/silence when used by itself |
 | `BD`, `SD`, `CH`, etc. | Two-letter drum names |
-| `p`, `mf`, `f`, etc. | Named velocity/dynamic |
+| `p`, `mf`, `f`, etc. | Named velocity/dynamic, e.g. `C4p` or `C4f` |
 | `@0..100` | Exact numeric velocity percentage |
 | `:0..100` | Sounding-duration/gate percentage |
 | `'`, `.`, `-`, `~` | Articulation/gate presets |
@@ -535,6 +535,19 @@ C4+E4+G4ff
 SDmf
 ```
 
+In particular:
+
+| MML | Meaning |
+|---|---|
+| `C4p` | C4 at **piano** dynamic |
+| `C4f` | C4 at **forte** dynamic |
+| `C4.` | C4 **staccato** at the current velocity |
+| `C4p.` | C4 **piano and staccato** |
+| `C4f.` | C4 **forte and staccato** |
+
+So `f` is a **dynamic marking (forte)**, not an articulation.  
+For staccato, append `.` after the dynamic: `C4f.` or `C4p.`.
+
 ### Numeric velocity: `@`
 
 Use `@0..100` for an exact velocity percentage:
@@ -591,6 +604,17 @@ D4.
 E4-
 F4~
 ```
+
+Dynamics can be combined directly with articulation:
+
+```text
+C4p.     piano staccato
+C4f.     forte staccato
+C4mf-    mezzo-forte tenuto
+C4ff~    fortissimo legato
+```
+
+The order is always **note -> dynamic/velocity -> articulation/gate**.
 
 Standalone `-` is a rest; trailing `-` is tenuto:
 
@@ -762,6 +786,11 @@ Examples:
 
 ```text
 C4
+C4p
+C4f
+C4.
+C4p.
+C4f.
 C4mf
 C4@73
 C4mf.
@@ -777,7 +806,11 @@ C4>
 Do not reverse modifier order:
 
 ```text
-C4f-      valid
+C4f       valid: forte
+C4.       valid: staccato
+C4p.      valid: piano staccato
+C4f.      valid: forte staccato
+C4f-      valid: forte tenuto
 C4-f      invalid
 ```
 
@@ -964,10 +997,12 @@ The BPM value is passed to MIDI as standard MIDI tempo (quarter notes per minute
 | Next beat | `\|` | `C4\|D4` |
 | Subdivide beat | `,` | `C4,D4` |
 | Chord | `+` | `C4+E4+G4` |
-| Named dynamic | `ppp..fff` | `C4mf` |
+| Named dynamic | `ppp..fff` | `C4f` |
 | Numeric velocity | `@0..100` | `C4@73` |
 | Staccatissimo | `'` | `C4'` |
 | Staccato | `.` | `C4.` |
+| Piano staccato | `p.` | `C4p.` |
+| Forte staccato | `f.` | `C4f.` |
 | Tenuto | trailing `-` | `C4-` |
 | Legato | `~` | `C4~` |
 | Exact gate | `:0..100` | `C4:60` |
@@ -982,5 +1017,5 @@ The BPM value is passed to MIDI as standard MIDI tempo (quarter notes per minute
 1. Every score starts with a header such as `[4/4,192,4]`; optional initial velocity/gate may be added, for example `[4/4,192,4,@68:80]`.
 2. Use `[ ... ]` for measures, `|` for beats, commas for subdivisions, and `+` for simultaneous events.
 3. Use `_` to carry the previous event and standalone `-` for silence; empty slots are invalid.
-4. Header and note-level velocity/gate share the same persistent state: use named dynamics or `@0..100` for velocity and `:0..100` for gate.
+4. Header and note-level velocity/gate share the same persistent state: use named dynamics or `@0..100` for velocity and `:0..100` for gate. For example, `C4f` is forte, while `C4f.` is forte staccato.
 5. Drum codes always use MIDI channel 10; the header channel applies to melodic notes.
