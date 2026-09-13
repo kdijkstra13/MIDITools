@@ -655,46 +655,30 @@ In particular:
 
 ---
 
-## 15. Unsupported assumptions from other MML dialects
-
-Do not assume this parser supports syntax from other MML languages. It currently has no syntax for:
-
-- `O4` octave commands;
-- `L4` default note lengths;
-- `T120` inline tempo changes;
-- loop/repeat commands;
-- lowercase note letters;
-- traditional dotted-duration notation;
-- automatic key-signature accidentals.
-
-Use the syntax documented here instead.
-
----
-
 ## Quick reference card
 
-| Goal | Syntax | Example |
-|---|---|---|
-| Note | `NOTE[octave]` | `C4` |
-| Sharp | `#` | `F#4` |
-| Flat | `b` | `Bb3` |
-| Rest | `X` | `X` |
-| Next beat | `|` | `C4|D4` |
-| Subdivide beat | `,` | `C4,D4` |
-| Chord | `+` | `C4+E4+G4` |
-| Hold previous event | empty slot | `C4| |G4` |
-| Named dynamic | `ppp..fff` | `C4mf` |
-| Numeric velocity | `@0..100` | `C4@73` |
-| Staccatissimo | `'` | `C4'` |
-| Staccato | `.` | `C4.` |
-| Tenuto | `-` | `C4-` |
-| Legato | `~` | `C4~` |
-| Exact gate/duration | `:0..100` | `C4:60` |
-| Velocity + gate | `@V:G` | `C4@73:60` |
-| Named dynamic + gate | `dynamic:G` | `C4mf:60` |
-| Marcato | `>` | `C4>` |
-| Crescendo start | `/` | `/C4` |
-| Diminuendo start | `\` | `\C4` |
+| Goal | Syntax         | Example     |
+|---|----------------|-------------|
+| Note | `NOTE[octave]` | `C4`        |
+| Sharp | `#`            | `F#4`       |
+| Flat | `b`            | `Bb3`       |
+| Rest | `X`            | `X`         |
+| Next beat | `\|`           | `C4\|D4`    |
+| Subdivide beat | `,`            | `C4,D4`     |
+| Chord | `+`            | `C4+E4+G4`  |
+| Hold previous event | empty slot     | `C4\| \|G4` |
+| Named dynamic | `ppp..fff`     | `C4mf`      |
+| Numeric velocity | `@0..100`      | `C4@73`     |
+| Staccatissimo | `'`            | `C4'`       |
+| Staccato | `.`            | `C4.`       |
+| Tenuto | `-`            | `C4-`       |
+| Legato | `~`            | `C4~`       |
+| Exact gate/duration | `:0..100`      | `C4:60`     |
+| Velocity + gate | `@V:G`         | `C4@73:60`  |
+| Named dynamic + gate | `dynamic:G`    | `C4mf:60`   |
+| Marcato | `>`            | `C4>`       |
+| Crescendo start | `/`            | `/C4`       |
+| Diminuendo start | `\`            | `\C4`       |
 
 ## Five rules to remember
 
