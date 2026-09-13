@@ -104,9 +104,6 @@ def _percentage(value: str, what: str) -> int:
 
 
 def _velocity(value: str) -> int:
-    value = value.lower()
-    if value in DYNAMICS:
-        return DYNAMICS[value]
     return _percentage(value, "velocity")
 
 
@@ -120,18 +117,19 @@ def _parse_sequence_note(sequence_note: str):
 
     Grammar (modifiers apply to the whole chord):
 
-        [RAMP] NOTE[+NOTE...][@VELOCITY][ARTICULATION | :GATE]
+        [RAMP] NOTE[+NOTE...][DYNAMIC | @VELOCITY][ARTICULATION | :GATE]
 
     Examples:
         C4
-        C4@mf
-        C4@73:60
-        C4+E4+G4@f-
-        /C4          start crescendo on C4
-        \\C4          start diminuendo on C4
-        C4>          marcato (one-note accent; does not carry)
+        C4mf          musical dynamic; no @ needed
+        C4@73:60      numeric velocity still requires @
+        C4+E4+G4f-
+        /C4           start crescendo on C4
+        \\C4           start diminuendo on C4
+        C4>           marcato (one-note accent; does not carry)
 
-    VELOCITY is ppp..fff or 0..100.
+    DYNAMIC is ppp, pp, p, mp, mf, f, ff, or fff.
+    VELOCITY is a numeric 0..100 value and requires @.
     GATE is 0..100.
     ARTICULATION is ', ., -, or ~ and carries forward.
     """
@@ -149,7 +147,6 @@ def _parse_sequence_note(sequence_note: str):
             )
 
     gate = None
-    articulation = None
     marcato = False
 
     gate_match = re.search(r":(\d{1,3})$", token)
@@ -157,17 +154,31 @@ def _parse_sequence_note(sequence_note: str):
         gate = _percentage(gate_match.group(1), "gate")
         token = token[:gate_match.start()]
     elif token and token[-1] in ARTICULATIONS:
-        articulation = token[-1]
+        gate = ARTICULATIONS[token[-1]]
         token = token[:-1]
     elif token.endswith(">"):
         marcato = True
         token = token[:-1]
 
     velocity = None
-    velocity_match = re.search(r"@([A-Za-z]+|\d{1,3})$", token)
+
+    # Numeric velocity is explicit: @0 .. @100. Musical dynamics are bare
+    # suffixes such as C4p, C4mf, and C4ff; @ is not accepted for them.
+    velocity_match = re.search(r"@(\d{1,3})$", token)
     if velocity_match:
         velocity = _velocity(velocity_match.group(1))
         token = token[:velocity_match.start()]
+    else:
+        dynamic_match = re.search(r"(?i)(ppp|fff|pp|ff|mp|mf|p|f)$", token)
+        if dynamic_match and dynamic_match.start() > 0:
+            candidate_notes = token[:dynamic_match.start()]
+            # Only treat the suffix as a dynamic when what precedes it can
+            # plausibly be a note/chord. This keeps a bare F note as F.
+            candidate_parts = [part.strip() for part in candidate_notes.split("+")]
+            note_pattern = re.compile(r"^[A-G](?:#|b)?\d?$|^X$")
+            if candidate_parts and all(note_pattern.match(part) for part in candidate_parts):
+                velocity = DYNAMICS[dynamic_match.group(1).lower()]
+                token = candidate_notes
 
     note_names = [part.strip() for part in token.split("+")]
     if not note_names or any(not note for note in note_names):
@@ -183,7 +194,6 @@ def _parse_sequence_note(sequence_note: str):
         "ramp": ramp,
         "velocity": velocity,
         "gate": gate,
-        "articulation": articulation,
         "marcato": marcato,
     }
 
@@ -225,7 +235,7 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
     current_gate = DEFAULT_GATE
     num_conc_notes = 0
 
-    # A pending ramp is resolved when the next explicit @dynamic/@number occurs.
+    # A pending ramp is resolved by the next explicit dynamic or @number.
     pending_ramp = None
 
     measures = notes[1:-1].split("][")
@@ -275,11 +285,10 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                     if explicit_velocity is not None:
                         current_velocity = explicit_velocity
 
-                    # Gate/articulation settings are persistent.
+                    # Gate settings are persistent. Articulation symbols are
+                    # simply aliases that parse directly to gate percentages.
                     if parsed["gate"] is not None:
                         current_gate = parsed["gate"]
-                    elif parsed["articulation"] is not None:
-                        current_gate = ARTICULATIONS[parsed["articulation"]]
 
                     event_start_index = len(v_list)
                     for note in parsed["notes"]:
@@ -320,7 +329,7 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
     if pending_ramp is not None:
         direction = "crescendo" if pending_ramp["direction"] == "/" else "diminuendo"
         raise ValueError(
-            f"Unfinished {direction}: add an explicit target dynamic such as @f or @p"
+            f"Unfinished {direction}: add an explicit target dynamic such as f or p"
         )
 
     for tick, pitch, duration, velocity, gate, marcato in zip(
