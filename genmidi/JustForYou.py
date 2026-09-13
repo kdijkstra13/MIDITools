@@ -23,27 +23,28 @@ drClass' MIDI Markup Language (MML)
 import midiutil
 from genmidi.main import create, add_notes
 
-mf = create(num=4, den=4, tempo=60, sign=midiutil.FLATS, scale=midiutil.MAJOR)
+mf = create(sign=midiutil.FLATS, scale=midiutil.MAJOR)
 
-add_notes(mf, 0, notes="[E5        |E, F, G   |E ,C       |         ]"
-                       "[          |D, C      |Eb, Db     |C, Bb4   ]"
-                       "[A         |A, Bb, C5 |G#4, A     |         ]"
-                       "[Bb4       |A4, C5    |           |         ]"
+add_notes(mf, 0, notes="[4/4,90,1,@70:80]"
+                       "[E5        |E, F, G   |E ,C       |_        ]"
+                       "[_         |D, C      |Eb, Db     |C, Bb4   ]"
+                       "[A         |A, Bb, C5 |G#4, A     |_        ]"
+                       "[Bb4       |A4, C5    |_          |_        ]"
 
-                       "[E5        |E, F, G   |E ,C       |         ]"
-                       "[          |D, C      |Eb, Db     |C, Bb4   ]"
+                       "[E5        |E, F, G   |E, C       |_        ]"
+                       "[_         |D, C      |Eb, Db     |C, Bb4   ]"
                        "[A         |A, Bb, C5 |G#4, A     |G#, A    ]"
-                       "[Bb4       |A4        |F          |         ]"
+                       "[Bb4       |A4        |F          |_        ]"
 
-                       "[X         |G5, Gb    |F, E       |C, C#    ]"
-                       "[D, F4     | , F      |           |         ]"
-                       "[X         |G5, Gb5   |F, E       |C, C#    ]"
-                       "[D         |          |           |         ]"
+                       "[_         |G5, Gb    |F, E       |C, C#    ]"
+                       "[D, F4     |_, F      |_          |_        ]"
+                       "[-         |G5, Gb5   |F, E       |C, C#    ]"
+                       "[D         |_         |_          |_        ]"
 
-                       "[X         |D5, C     |F, Eb      |D, C     ]"
+                       "[-         |D5, C     |F, Eb      |D, C     ]"
                        "[Bb4       |Bb, A     |C5,Bb4     |F4, G4   ]"
-                       "[A         |          |           | , A     ]"
-                       "[Bb        |A, C5     |           |         ]"
+                       "[A         |_         |-          |_, A     ]"
+                       "[Bb        |A, C5     |_          |_        ]"
           )
 
 Am7 = "G3+A3+C4+E4"
@@ -74,7 +75,8 @@ Gm7 = "F3+G3+Bb3+D4"
 Gm7b = "G3+Bb3+D4+F4"
 Gb7m5 = "F3+G3+Bb3+Db4"
 
-add_notes(mf, 1, notes=f"[{Fmaj7}|{Fmaj7}|{Dm7}   |{Dm7}   ]"
+add_notes(mf, 1, notes=f"[4/4,90,1,@40:95]"
+                       f"[{Fmaj7}|{Fmaj7}|{Dm7}   |{Dm7}   ]"
                        f"[{Gm7}  |{Gm7}  |{C7}    |{C7}    ]"
                        f"[{Am7}  |{Am7}  |{Fisdim}|{Fisdim}]"
                        f"[{Gm7}  |{Gm7}  |{C7}    |{C7}    ]"
@@ -82,7 +84,7 @@ add_notes(mf, 1, notes=f"[{Fmaj7}|{Fmaj7}|{Dm7}   |{Dm7}   ]"
                        f"[{Fmaj7}|{Fmaj7}|{Dm7}   |{Dm7}   ]"
                        f"[{Gm7}  |{Gm7}  |{C7}    |{C7}    ]"
                        f"[{Am7}  |{Am7}  |{Fisdim}|{Fisdim}]"
-                       f"[{Gm7b} |{C7a}  |{F6}    |        ]"
+                       f"[{Gm7b} |{C7a}  |{F6}    |_       ]"
 
                        f"[{Cm7}  |{Cm7}     |{F7}   |{F7}   ]"
                        f"[{Dm7a} |{Dm7a}    |{Bes}  |{Bes}  ]"
