@@ -12,7 +12,7 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 
-drClass' MIDI Markup Language (DrC's MML)
+Xala Delta's MIDI Markup Language (Xala Delta's MML)
 
 1) Create MIDI files for Synthesia using a MIDI markup language
 """
@@ -34,7 +34,7 @@ NOTES = {"-": 0,  # rest
          "B": 71}
 
 # Two-letter General MIDI percussion names. Percussion is written by add_notes()
-# on MIDI channel 10 (zero-based channel 9); melodic notes remain on channel 1.
+# on MIDI channel 10 (zero-based channel 9); the score header selects the melodic channel.
 DRUMS = {
     "BD": 36,  # Bass Drum 1
     "SS": 37,  # Side Stick
@@ -53,7 +53,6 @@ DRUMS = {
     "CB": 56,  # Cowbell
 }
 
-MELODIC_CHANNEL = 0
 PERCUSSION_CHANNEL = 9
 # Human-readable 0..100 velocity scale. These values are intentionally
 # simple presets rather than claims about absolute acoustic loudness.
@@ -80,11 +79,15 @@ DEFAULT_GATE = 100
 MARCATO_GATE = 70
 MARCATO_VELOCITY_FACTOR = 1.20
 
-def create_midi(track_names: List[str], tempo=120) -> MIDIFile:
+def create_midi(track_names: List[str]) -> MIDIFile:
+    """Create a MIDI file and name its tracks.
+
+    Tempo and time signature are supplied by each MML score header in
+    add_notes(), not here.
+    """
     mf = MIDIFile(numTracks=len(track_names))
     for i, name in enumerate(track_names):
         mf.addTrackName(track=i, time=0, trackName=name)
-        mf.addTempo(track=i, time=0, tempo=tempo)
     return mf
 
 
@@ -121,6 +124,56 @@ def _percentage(value: str, what: str) -> int:
 def _midi_velocity(percent: float) -> int:
     """Convert the readable 0..100 scale to MIDI's 0..127 velocity."""
     return max(0, min(127, round(percent * 127 / 100)))
+
+
+def _parse_header(notes: str):
+    """Parse the mandatory [numerator/denominator,tempo,channel] header.
+
+    Example: [4/4,192,4]
+        4/4  -> time signature
+        192  -> tempo in BPM
+        4    -> melodic MIDI channel (human numbering 1..16)
+
+    MIDIUtil expects the time-signature denominator as log2(denominator), so
+    the conversion happens here, at the boundary between human MML and MIDI.
+    """
+    match = re.match(
+        r"^\[\s*(\d+)\s*/\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]",
+        notes,
+    )
+    if not match:
+        raise ValueError(
+            "MML must start with a header such as [4/4,192,4]"
+        )
+
+    numerator = int(match.group(1))
+    denominator = int(match.group(2))
+    tempo = int(match.group(3))
+    channel = int(match.group(4))
+
+    if numerator < 1:
+        raise ValueError("Time-signature numerator must be at least 1")
+    if denominator < 1 or denominator & (denominator - 1):
+        raise ValueError("Time-signature denominator must be a power of two")
+    if tempo < 1:
+        raise ValueError("Tempo must be at least 1 BPM")
+    if not 1 <= channel <= 16:
+        raise ValueError("MIDI channel must be between 1 and 16")
+
+    body = notes[match.end():].strip()
+    if not body:
+        raise ValueError("MML header must be followed by at least one measure")
+    if not (body.startswith("[") and body.endswith("]")):
+        raise ValueError("MML body must contain bracketed measures after the header")
+
+    return {
+        "numerator": numerator,
+        "denominator": denominator,
+        "midi_denominator": denominator.bit_length() - 1,
+        "tempo": tempo,
+        "channel": channel - 1,
+        "body": body,
+    }
 
 
 def _parse_sequence_note(sequence_note: str):
@@ -238,16 +291,33 @@ def _resolve_ramp(v_list, t_list, start_index, start_time, start_velocity,
 
 
 def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
-    """Add melodic notes and/or two-letter drum events from an MML string.
+    """Add an MML score whose first bracket is a mandatory score header.
 
-    Melodic notes are emitted on MIDI channel 1 (zero-based channel 0).
-    Drum names from DRUMS are emitted on the General MIDI percussion channel,
-    MIDI channel 10 (zero-based channel 9).
+    Header syntax: [numerator/denominator,tempo,channel], e.g. [4/4,192,4].
+    The header controls the time signature, tempo, and melodic MIDI channel.
+    Each '|' beat has the duration of the time-signature denominator: quarter-note
+    units for /4, eighth-note units for /8, half-note units for /2, and so on.
+    Drum names from DRUMS always use General MIDI percussion channel 10
+    (zero-based channel 9).
 
-    The same rhythm, velocity, gate, articulation, marcato, chord, and hold
-    syntax is shared by both kinds of events. Use '_' to carry/hold the complete
-    previous event, including drum hits, and '-' for silence. Empty slots are invalid.
+    Use '_' to carry/hold the complete previous event, including drum hits,
+    and '-' for silence. Empty slots are invalid.
     """
+    header = _parse_header(notes)
+    melodic_channel = header["channel"]
+    beat_duration = 4 / header["denominator"]
+    notes = header["body"]
+
+    mf.addTempo(track=track, time=time, tempo=header["tempo"])
+    mf.addTimeSignature(
+        track=track,
+        time=time,
+        numerator=header["numerator"],
+        denominator=header["midi_denominator"],
+        clocks_per_tick=32,
+        notes_per_quarter=8,
+    )
+
     p_list = []
     d_list = []
     t_list = []
@@ -276,7 +346,7 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
             print(f"notes: {note_per_measure}")
             sequence_notes = note_per_measure.split(",")
             if note_per_measure.strip():
-                duration = round(1 / len(sequence_notes), 2)
+                duration = beat_duration / len(sequence_notes)
                 sub_tick = 0
                 for sequence_note in sequence_notes:
                     print(f"note: {sequence_note}")
@@ -333,7 +403,7 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                             display_octave = "drum"
                         else:
                             pitch, current_octave = note_to_pitch(note, current_octave)
-                            channel = MELODIC_CHANNEL
+                            channel = melodic_channel
                             display_octave = current_octave
 
                         p_list.append(pitch)
@@ -369,7 +439,7 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                     "Empty beat is not valid MML; use '_' to carry the previous "
                     "event or '-' for a rest"
                 )
-            tick += 1
+            tick += beat_duration
 
     if pending_ramp is not None:
         direction = "crescendo" if pending_ramp["direction"] == "/" else "diminuendo"
@@ -392,12 +462,22 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                 volume=_midi_velocity(velocity),
             )
 
-def create(num, den, sign, scale, tempo):
-    translate = {2: 1, 4: 2, 8: 3, 16: 4}
-    den = translate[den]
-    mf = create_midi(["right_hand", "left_hand"], tempo=tempo)
-    mf.addTimeSignature(track=0, time=0, numerator=num, denominator=den, clocks_per_tick=32, notes_per_quarter=8)
-    mf.addKeySignature(track=0, time=0, accidentals=1, accidental_type=sign, mode=scale)
-    mf.addTimeSignature(track=1, time=0, numerator=num, denominator=den, clocks_per_tick=32, notes_per_quarter=8)
-    mf.addKeySignature(track=1, time=0, accidentals=1, accidental_type=sign, mode=scale)
+def create(sign, scale, track_names=None):
+    """Create a MIDI file. Tempo and meter come from add_notes() headers.
+
+    Key-signature metadata remains a file/track concern. By default the file
+    contains the historical right_hand and left_hand tracks.
+    """
+    if track_names is None:
+        track_names = ["right_hand", "left_hand"]
+
+    mf = create_midi(track_names)
+    for track in range(len(track_names)):
+        mf.addKeySignature(
+            track=track,
+            time=0,
+            accidentals=1,
+            accidental_type=sign,
+            mode=scale,
+        )
     return mf
