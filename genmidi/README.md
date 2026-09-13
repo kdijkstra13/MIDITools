@@ -29,8 +29,9 @@ The most important symbols are:
 | `|` | Next beat |
 | `,` | Split a beat into equal subdivisions |
 | `+` | Play notes together as a chord |
-| `X` | Rest |
-| empty beat/subdivision | Continue the previous note or chord for that slot |
+| `-` | Rest / silence when used by itself |
+| `BD`, `SD`, `CH`, etc. | Two-letter drum/percussion names |
+| `_` | Carry/hold the complete previous event, including drums |
 | `p`, `mf`, `f`, etc. | Named velocity/dynamic |
 | `@0..100` | Numeric velocity percentage |
 | `:0..100` | Sounding-duration/gate percentage |
@@ -49,7 +50,7 @@ A compact example using several features:
 
 ## 1. Notes
 
-Supported pitches are:
+`add_notes()` accepts both melodic notes and two-letter drum names. Melodic pitches are:
 
 ```text
 C  C#  Db  D  D#  Eb  E  F  F#  Gb  G  G#  Ab  A  A#  Bb  B
@@ -173,16 +174,17 @@ Adjacent measures are normally written directly next to each other:
 
 ## 3. Chords
 
-Use `+` to play several notes at the same time:
+Use `+` to play several notes or drum hits at the same time:
 
 ```text
 C4+E4+G4
 ```
 
-A chord takes the same rhythmic slot as a single note.
+A chord takes the same rhythmic slot as a single note. Drum hits can be combined with each other or with melodic notes.
 
 ```text
 [C4+E4+G4|F4+A4+C5|G4+B4+D5|C4+E4+G4]
+[BD+CH|CH|SD+CH|CH]
 ```
 
 Chords and subdivisions can be combined:
@@ -203,63 +205,161 @@ C4+E4+G4mf:80
 
 ## 4. Rests
 
-Use `X` for a rest:
+Use a standalone `-` for a rest:
 
 ```text
-[C4|X|E4|X]
+[C4|-|E4|-]
 ```
+
+`-` has two context-dependent meanings: by itself it is a rest, while after a note or chord it remains the tenuto articulation. For example, `-` is silence but `C4-` is a tenuto C4.
 
 A rest consumes its rhythmic slot but does not create a MIDI note.
 
 A rest does not reset the current octave:
 
 ```text
-[C5|X|D]
+[C5|-|D]
 ```
 
 The final `D` is `D5`.
 
 ---
 
-## 5. Holding and extending notes
+## 5. Drums and percussion
 
-An empty beat extends the previously started note or chord by one beat:
+Drums are written with **two uppercase letters** and are handled by the same `add_notes()` function as melodic notes. No separate drum function or drum syntax is needed.
+
+`add_notes()` writes ordinary melodic notes on MIDI channel 1 and drum names on the General MIDI percussion channel, MIDI channel 10. (`midiutil` numbers channels from zero, so the implementation uses `channel=9` for drums.)
+
+Supported drum names are:
+
+| Code | Drum sound | GM note |
+|---|---|---:|
+| `BD` | Bass Drum 1 | 36 |
+| `SS` | Side Stick | 37 |
+| `SD` | Acoustic Snare | 38 |
+| `CP` | Hand Clap | 39 |
+| `CH` | Closed Hi-Hat | 42 |
+| `PH` | Pedal Hi-Hat | 44 |
+| `LT` | Low Tom | 45 |
+| `OH` | Open Hi-Hat | 46 |
+| `MT` | Low-Mid Tom | 47 |
+| `CR` | Crash Cymbal 1 | 49 |
+| `HT` | High Tom | 50 |
+| `RD` | Ride Cymbal 1 | 51 |
+| `RB` | Ride Bell | 53 |
+| `TB` | Tambourine | 54 |
+| `CB` | Cowbell | 56 |
+
+The rhythm syntax is unchanged. `|` still means the next beat, commas still subdivide a beat, and `+` still means simultaneous events.
+
+A simple four-on-the-floor style pattern:
 
 ```text
-[C4| | |G4]
+[BD+CH,CH,CH,CH|SD+CH,CH,CH,CH|BD+CH,CH,BD+CH,CH|SD+CH,CH,CH,OH]
+```
+
+The same modifiers used for notes also work on drums:
+
+```text
+SDf        # forte snare
+BD@90      # exact 90% velocity
+CHp        # piano closed hi-hat
+OH:80      # 80% sounding duration/gate
+SD>        # marcato/accented snare
+```
+
+Named dynamics still do **not** use `@`; `@` is only for numeric velocity.
+
+Because melodic notes and drums share the same parser, they can even occur simultaneously:
+
+```text
+C4+BD
+C4+E4+G4+CRf
+```
+
+Each melodic note is sent on channel 1; each drum hit is sent on channel 10.
+
+### Holding drums and explicit silence
+
+Use `_` to carry the complete previous event into the current rhythmic slot. This works identically for drums, melodic notes, and mixed chords.
+
+```text
+[BD,_,_,_|SD,_,_,_]
+```
+
+Each beat above is split into four sixteenth-note slots. `BD` starts on the first slot of beat 1 and each `_` extends it by one more slot, so it has a notated duration of one full beat. `SD` is held the same way on beat 2. Whether a drum module audibly responds to the longer MIDI note depends on that instrument, but the MML duration is still extended.
+
+Use `-` when you want an explicitly silent step:
+
+```text
+[BD,-,-,-|SD,-,-,-]
+```
+
+Here `BD` and `SD` each occupy only their first sixteenth-note slot; every standalone `-` consumes one silent subdivision.
+
+Mixed melodic/percussion events are held together:
+
+```text
+[C4+BD,_|D4]
+```
+
+The `_` in the second half of beat 1 extends both `C4` and `BD` by half a beat.
+
+---
+
+## 6. Holding and extending events
+
+Use `_` to extend the complete previously started event by the current beat or subdivision. This applies to melodic notes, drums, and mixed chords:
+
+```text
+[C4|_|_|G4]
 ```
 
 `C4` starts on beat 1 and continues through beats 2 and 3. `G4` starts on beat 4.
 
-The same works for chords:
+The same works for chords and drum events:
 
 ```text
-[C4+E4+G4| | |F4+A4+C5]
+[C4+E4+G4|_|_|F4+A4+C5]
+[BD+CH|_|SD+CH|_]
 ```
 
-### Empty comma subdivisions
-
-An empty comma slot occupies exactly one subdivision. If there is a previous note/chord, that event is extended by exactly that slot's duration.
+If you want silence instead of a hold, write `-` explicitly:
 
 ```text
-[C4,|D4]
+[BD|-|SD|-]
 ```
 
-The first beat has two half-beat slots. `C4` starts in the first slot and the empty second slot extends it by another half beat, so `C4` lasts one complete beat.
+### Carrying through comma subdivisions
 
-A leading empty slot is silence until the first note begins:
+A `_` subdivision occupies exactly one subdivision and extends the complete previous event by exactly that slot's duration.
 
 ```text
-[,C4|D4]
+[C4,_|D4]
 ```
 
-Here `C4` begins halfway through the first beat.
+The first beat has two half-beat slots. `C4` starts in the first slot and `_` extends it by another half beat, so `C4` lasts one complete beat. A drum event behaves the same way.
+
+```text
+[BD,_|SD]
+```
+
+Here `BD` also lasts one complete beat. To make the second half-beat silent instead, write `[BD,-|SD]`.
+
+A carry must have a previous event. A leading `_` is therefore invalid:
+
+```text
+[_,C4|D4]   # invalid
+```
+
+Empty beats and empty subdivisions are also invalid. Write `_` for carry or `-` for rest explicitly. This catches accidental doubled separators such as `||` or `,,` instead of silently changing the rhythm.
 
 A bare `.` is **not** a hold marker. `.` is only valid as an articulation suffix such as `C4.`.
 
 ---
 
-## 6. Dynamics and velocity
+## 7. Dynamics and velocity
 
 Velocity can be written in two ways:
 
@@ -319,7 +419,7 @@ The default internal velocity is 79%, which maps to MIDI velocity 100.
 
 ---
 
-## 7. Articulation and sounding duration
+## 8. Articulation and sounding duration
 
 Articulation changes how much of the written rhythmic duration actually sounds.
 
@@ -327,7 +427,7 @@ Articulation changes how much of the written rhythmic duration actually sounds.
 |---|---|---:|
 | `'` | staccatissimo | 25% |
 | `.` | staccato | 50% |
-| `-` | tenuto | 95% |
+| `-` | tenuto when used as a suffix | 95% |
 | `~` | legato | 100% |
 
 Examples:
@@ -379,7 +479,7 @@ means:
 
 ---
 
-## 8. Combining velocity and duration modifiers
+## 9. Combining velocity and duration modifiers
 
 The general order is:
 
@@ -417,7 +517,7 @@ C4-f      # invalid
 
 ---
 
-## 9. Marcato
+## 10. Marcato
 
 Append `>` for a one-event marcato accent:
 
@@ -446,7 +546,7 @@ Only `D4` receives the marcato accent.
 
 ---
 
-## 10. Crescendo and diminuendo
+## 11. Crescendo and diminuendo
 
 Use `/` before a note/chord to start a crescendo:
 
@@ -505,7 +605,7 @@ notes = r"[C5ff|\B4|A4|G4][F4|E4|D4|C4p]"
 
 ---
 
-## 11. Modifier grammar
+## 12. Modifier grammar
 
 A note/chord event has this general shape:
 
@@ -517,7 +617,7 @@ where:
 
 ```text
 RAMP       = / or \
-CHORD      = NOTE or NOTE+NOTE+...
+CHORD      = EVENT-NAME or EVENT-NAME+EVENT-NAME+...
 VELOCITY   = ppp | pp | p | mp | mf | f | ff | fff | @0..100
 ENDING     = ' | . | - | ~ | :0..100 | >
 ```
@@ -541,11 +641,15 @@ C4>
 ```text
 score       := measure measure ...
 measure     := "[" beat ("|" beat)* "]"
-beat        := empty | slot ("," slot)*
-slot        := empty | event
+beat        := slot ("," slot)*
+slot        := event | carry
+carry       := "_"
 event       := [ramp] chord [velocity] [ending]
-chord       := note ("+" note)*
-note        := A-G ["#" | "b"] [octave] | "X"
+chord       := event_name ("+" event_name)*
+event_name  := note | drum | rest
+note        := A-G ["#" | "b"] [octave]
+rest        := "-"
+drum        := BD | SS | SD | CP | CH | PH | LT | OH | MT | CR | HT | RD | RB | TB | CB
 octave      := one decimal digit
 ramp        := "/" | "\\"
 velocity    := dynamic | "@" percent
@@ -556,7 +660,7 @@ percent     := integer from 0 through 100
 
 ---
 
-## 12. Worked examples
+## 13. Worked examples
 
 ### Scale
 
@@ -580,13 +684,13 @@ percent     := integer from 0 through 100
 ### Melody with rests
 
 ```text
-[C4,D4|E4|X|G4,A4][B4|X|A4,G4|C5]
+[C4,D4|E4|-|G4,A4][B4|-|A4,G4|C5]
 ```
 
 ### Held chord
 
 ```text
-[C4+E4+G4| | |F4+A4+C5]
+[C4+E4+G4|_|_|F4+A4+C5]
 ```
 
 ### Named dynamics and articulation
@@ -607,9 +711,21 @@ percent     := integer from 0 through 100
 [C4p|/D4,E4|F4|G4][A4|B4|C5|C5+E5+G5ff-]
 ```
 
+### Drum pattern
+
+```text
+[BD+CH,CH,CH,CH|SD+CH,CH,CH,CH|BD+CH,CH,BD+CH,CH|SD+CH,CH,CH,OH]
+```
+
+### Melody and drums in one call
+
+```text
+[C4+BD|D4+CH|E4+SD|F4+CH]
+```
+
 ---
 
-## 13. Using MML from Python
+## 14. Using MML from Python
 
 ```python
 import midiutil
@@ -624,10 +740,14 @@ mf = create(
 )
 
 right_hand = "[C4p|D|E|F][Gmf|A|B|C5f]"
-left_hand = "[C3+E3+G3| |F3+A3+C4| ][G3+B3+D4| |C3+E3+G3| ]"
+left_hand = "[C3+E3+G3|_|F3+A3+C4|_][G3+B3+D4|_|C3+E3+G3|_]"
 
 add_notes(mf, 0, right_hand)
 add_notes(mf, 1, left_hand)
+
+# add_notes() also accepts drums; they are emitted on MIDI channel 10.
+drums = "[BD+CH,CH,CH,CH|SD+CH,CH,CH,OH]"
+add_notes(mf, 1, drums)
 
 with open("example.mid", "wb") as f:
     mf.writeFile(f)
@@ -641,7 +761,7 @@ add_notes(mf, 0, "[C4|D4|E4|F4]", time=8)
 
 ---
 
-## 14. Time signature and key signature behavior
+## 15. Time signature and key signature behavior
 
 `create()` writes time-signature and key-signature MIDI metadata, but MML rhythm and pitches are still explicit.
 
@@ -652,38 +772,40 @@ In particular:
 - commas subdivide that beat equally;
 - key-signature metadata does not automatically alter MML notes;
 - write accidentals such as `F#` or `Bb` explicitly.
-
+- 
 ---
 
 ## Quick reference card
 
-| Goal | Syntax         | Example     |
-|---|----------------|-------------|
-| Note | `NOTE[octave]` | `C4`        |
-| Sharp | `#`            | `F#4`       |
-| Flat | `b`            | `Bb3`       |
-| Rest | `X`            | `X`         |
-| Next beat | `\|`           | `C4\|D4`    |
-| Subdivide beat | `,`            | `C4,D4`     |
-| Chord | `+`            | `C4+E4+G4`  |
-| Hold previous event | empty slot     | `C4\| \|G4` |
-| Named dynamic | `ppp..fff`     | `C4mf`      |
-| Numeric velocity | `@0..100`      | `C4@73`     |
-| Staccatissimo | `'`            | `C4'`       |
-| Staccato | `.`            | `C4.`       |
-| Tenuto | `-`            | `C4-`       |
-| Legato | `~`            | `C4~`       |
-| Exact gate/duration | `:0..100`      | `C4:60`     |
-| Velocity + gate | `@V:G`         | `C4@73:60`  |
-| Named dynamic + gate | `dynamic:G`    | `C4mf:60`   |
-| Marcato | `>`            | `C4>`       |
-| Crescendo start | `/`            | `/C4`       |
-| Diminuendo start | `\`            | `\C4`       |
+| Goal                      | Syntax               | Example                    |
+|---------------------------|----------------------|----------------------------|
+| Note                      | `NOTE[octave]`       | `C4`                       |
+| Sharp                     | `#`                  | `F#4`                      |
+| Flat                      | `b`                  | `Bb3`                      |
+| Rest                      | standalone `-`       | `C4`                        |-|D4` |
+| Drum                      | two-letter drum code | `BD`                       |
+| Drum chord                | `+`                  | `BD+CH`                    |
+| Next beat                 | `\| `                | `C4\|D4` |
+| Subdivide beat            | `,`                  | `C4,D4`                    |
+| Chord                     | `+`                  | `C4+E4+G4`                 |
+| Carry/hold previous event | `_`                  | `C4\|_\|G4` or `BD\|_\|SD` |
+| Named dynamic             | `ppp..fff`           | `C4mf`                     |
+| Numeric velocity          | `@0..100`            | `C4@73`                    |
+| Staccatissimo             | `'`                  | `C4'`                      |
+| Staccato                  | `.`                  | `C4.`                      |
+| Tenuto                    | `-`                  | `C4-`                      |
+| Legato                    | `~`                  | `C4~`                      |
+| Exact gate/duration       | `:0..100`            | `C4:60`                    |
+| Velocity + gate           | `@V:G`               | `C4@73:60`                 |
+| Named dynamic + gate      | `dynamic:G`          | `C4mf:60`                  |
+| Marcato                   | `>`                  | `C4>`                      |
+| Crescendo start           | `/`                  | `/C4`                      |
+| Diminuendo start          | `\`                  | `\C4`                      |
 
 ## Five rules to remember
 
 1. Use `[ ... ]` for measures, `|` for beats, and commas for equal subdivisions.
-2. Use `+` for chords and `X` for rests.
+2. Use `+` for simultaneous notes/drums, standalone `-` for rests, and two-letter names such as `BD`, `SD`, and `CH` for percussion.
 3. Write named dynamics directly: `C4p`, `C4mf`, `C4ff`.
 4. Use `@` only for numeric velocity percentages such as `C4@73`; use `:` for duration/gate percentages such as `C4:60`.
-5. Octave, velocity, and gate/articulation settings carry forward until changed.
+5. Use `_` to carry the previous event and standalone `-` for explicit silence; empty slots are invalid.

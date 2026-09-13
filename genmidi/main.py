@@ -19,7 +19,7 @@ drClass' MIDI Markup Language (DrC's MML)
 import re
 from midiutil.MidiFile import MIDIFile
 from typing import List, Tuple
-NOTES = {"X": 0,  # rest
+NOTES = {"-": 0,  # rest
          "C": 60,
          "C#": 61, "Db": 61,
          "D": 62,
@@ -32,6 +32,29 @@ NOTES = {"X": 0,  # rest
          "A": 69,
          "A#": 70, "Bb": 70,
          "B": 71}
+
+# Two-letter General MIDI percussion names. Percussion is written by add_notes()
+# on MIDI channel 10 (zero-based channel 9); melodic notes remain on channel 1.
+DRUMS = {
+    "BD": 36,  # Bass Drum 1
+    "SS": 37,  # Side Stick
+    "SD": 38,  # Acoustic Snare
+    "CP": 39,  # Hand Clap
+    "CH": 42,  # Closed Hi-Hat
+    "PH": 44,  # Pedal Hi-Hat
+    "LT": 45,  # Low Tom
+    "OH": 46,  # Open Hi-Hat
+    "MT": 47,  # Low-Mid Tom
+    "CR": 49,  # Crash Cymbal 1
+    "HT": 50,  # High Tom
+    "RD": 51,  # Ride Cymbal 1
+    "RB": 53,  # Ride Bell
+    "TB": 54,  # Tambourine
+    "CB": 56,  # Cowbell
+}
+
+MELODIC_CHANNEL = 0
+PERCUSSION_CHANNEL = 9
 # Human-readable 0..100 velocity scale. These values are intentionally
 # simple presets rather than claims about absolute acoustic loudness.
 DYNAMICS = {
@@ -67,7 +90,7 @@ def create_midi(track_names: List[str], tempo=120) -> MIDIFile:
 
 def note_to_pitch(note: str, oct=None) -> Tuple[int, int]:
     # A rest must not reset the carried octave.
-    if note == "X":
+    if note == "-":
         return 0, oct
     if len(note) == 1 or (note[1] != "b" and note[1] != "#"):
         pitch = NOTES[note[:1]]
@@ -114,6 +137,10 @@ def _parse_sequence_note(sequence_note: str):
         C4mf:60
         C4@73:60
         C4+E4+G4f-
+        BD+CH
+        SDf
+        OH@73:60
+        -             rest / silence
         /C4          start crescendo on C4
         \\C4          start diminuendo on C4
         C4>          marcato (one-note accent; does not carry)
@@ -122,6 +149,7 @@ def _parse_sequence_note(sequence_note: str):
     or a numeric percentage written as @0..100.
     GATE is a sounding-duration percentage written as :0..100.
     ARTICULATION is ', ., -, or ~ and carries forward.
+    DRUM is one of the two-letter names in DRUMS and uses MIDI channel 10.
     """
     token = sequence_note.strip()
     if token == "":
@@ -145,6 +173,10 @@ def _parse_sequence_note(sequence_note: str):
     if gate_match:
         gate = _percentage(gate_match.group(1), "gate")
         token = token[:gate_match.start()]
+    elif token == "-":
+        # A standalone '-' is the rest token. A trailing '-' on a note or
+        # chord (for example C4-) remains the tenuto articulation.
+        pass
     elif token and token[-1] in ARTICULATIONS:
         articulation = token[-1]
         token = token[:-1]
@@ -170,10 +202,10 @@ def _parse_sequence_note(sequence_note: str):
     note_names = [part.strip() for part in token.split("+")]
     if not note_names or any(not note for note in note_names):
         raise ValueError(f"Invalid note/chord token: {sequence_note!r}")
-    note_pattern = re.compile(r"^[A-G](?:#|b)?\d?$|^X$")
+    note_pattern = re.compile(r"^[A-G](?:#|b)?\d?$|^-$")
     for note in note_names:
-        if not note_pattern.match(note):
-            raise ValueError(f"Invalid note {note!r} in token {sequence_note!r}")
+        if note not in DRUMS and not note_pattern.match(note):
+            raise ValueError(f"Invalid note/drum {note!r} in token {sequence_note!r}")
 
     return {
         "notes": note_names,
@@ -206,17 +238,33 @@ def _resolve_ramp(v_list, t_list, start_index, start_time, start_velocity,
 
 
 def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
+    """Add melodic notes and/or two-letter drum events from an MML string.
+
+    Melodic notes are emitted on MIDI channel 1 (zero-based channel 0).
+    Drum names from DRUMS are emitted on the General MIDI percussion channel,
+    MIDI channel 10 (zero-based channel 9).
+
+    The same rhythm, velocity, gate, articulation, marcato, chord, and hold
+    syntax is shared by both kinds of events. Use '_' to carry/hold the complete
+    previous event, including drum hits, and '-' for silence. Empty slots are invalid.
+    """
     p_list = []
     d_list = []
     t_list = []
     v_list = []
     g_list = []
     marcato_list = []
+    channel_list = []
     tick = 0
     current_octave = 4
     current_velocity = DEFAULT_VELOCITY
     current_gate = DEFAULT_GATE
-    num_conc_notes = 0
+    previous_event_indices = []
+
+    def extend_previous_event(duration):
+        """Extend every member of the previous event by the given duration."""
+        for index in previous_event_indices:
+            d_list[index] += duration
 
     # A pending ramp is resolved by the next explicit named or numeric velocity.
     pending_ramp = None
@@ -232,13 +280,19 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                 sub_tick = 0
                 for sequence_note in sequence_notes:
                     print(f"note: {sequence_note}")
-                    # An empty subdivision is a tie/rest-like continuation for exactly
-                    # one subdivision. It must never extend by the reciprocal duration.
-                    if not sequence_note.strip():
-                        for i in range(num_conc_notes):
-                            d_list[-(i + 1)] += duration
+                    token = sequence_note.strip()
+                    if not token:
+                        raise ValueError(
+                            "Empty subdivision is not valid MML; use '_' to carry "
+                            "the previous event or '-' for a rest"
+                        )
+                    if token == "_":
+                        if not previous_event_indices:
+                            raise ValueError("Carry '_' has no previous event to extend")
+                        extend_previous_event(duration)
                         sub_tick += duration
                         continue
+
                     parsed = _parse_sequence_note(sequence_note)
                     event_time = tick + sub_tick
                     if parsed["ramp"] is not None:
@@ -250,7 +304,9 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                             "start_time": event_time,
                             "start_velocity": current_velocity,
                         }
-                    # An explicit named or numeric velocity is persistent and also closes a pending ramp.
+
+                    # An explicit named or numeric velocity is persistent and also
+                    # closes a pending ramp.
                     explicit_velocity = parsed["velocity"]
                     ramp_to_resolve = pending_ramp if (
                         explicit_velocity is not None
@@ -260,25 +316,41 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                     if explicit_velocity is not None:
                         current_velocity = explicit_velocity
 
-                    # Gate/articulation settings are persistent.
+                    # Gate/articulation settings are persistent for both melodic
+                    # notes and drums.
                     if parsed["gate"] is not None:
                         current_gate = parsed["gate"]
                     elif parsed["articulation"] is not None:
                         current_gate = ARTICULATIONS[parsed["articulation"]]
+
+                    event_indices = []
                     for note in parsed["notes"]:
                         print(f"note+: {note}")
-                        pitch, current_octave = note_to_pitch(note, current_octave)
+                        is_drum = note in DRUMS
+                        if is_drum:
+                            pitch = DRUMS[note]
+                            channel = PERCUSSION_CHANNEL
+                            display_octave = "drum"
+                        else:
+                            pitch, current_octave = note_to_pitch(note, current_octave)
+                            channel = MELODIC_CHANNEL
+                            display_octave = current_octave
+
                         p_list.append(pitch)
                         d_list.append(duration)
                         t_list.append(event_time)
                         v_list.append(float(current_velocity))
                         g_list.append(MARCATO_GATE if parsed["marcato"] else current_gate)
                         marcato_list.append(parsed["marcato"])
+                        channel_list.append(channel)
+                        event_indices.append(len(p_list) - 1)
                         print(
-                            f"note:{note} octave:{current_octave} len:{duration} "
-                            f"time:{time + sub_tick} velocity:{current_velocity} gate:{g_list[-1]}"
+                            f"note:{note} octave:{display_octave} len:{duration} "
+                            f"time:{time + event_time} velocity:{current_velocity} "
+                            f"gate:{g_list[-1]} channel:{channel + 1}"
                         )
-                    num_conc_notes = len(parsed["notes"])
+
+                    previous_event_indices = event_indices
                     if ramp_to_resolve is not None:
                         _resolve_ramp(
                             v_list=v_list,
@@ -292,9 +364,11 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
                         )
                         pending_ramp = None
                     sub_tick += duration
-            else:  # Empty beat connects the previous notes.
-                for i in range(num_conc_notes):
-                    d_list[-(i + 1)] += 1
+            else:
+                raise ValueError(
+                    "Empty beat is not valid MML; use '_' to carry the previous "
+                    "event or '-' for a rest"
+                )
             tick += 1
 
     if pending_ramp is not None:
@@ -302,15 +376,16 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0):
         raise ValueError(
             f"Unfinished {direction}: add an explicit target velocity such as f, p, or @70"
         )
-    for tick, pitch, duration, velocity, gate, marcato in zip(
-        t_list, p_list, d_list, v_list, g_list, marcato_list
+
+    for tick, pitch, duration, velocity, gate, marcato, channel in zip(
+        t_list, p_list, d_list, v_list, g_list, marcato_list, channel_list
     ):
         if pitch != 0:  # rest
             if marcato:
                 velocity = min(100, velocity * MARCATO_VELOCITY_FACTOR)
             mf.addNote(
                 track=track,
-                channel=0,
+                channel=channel,
                 pitch=pitch,
                 time=time + tick,
                 duration=duration * gate / 100,
