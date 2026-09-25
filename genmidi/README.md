@@ -31,7 +31,7 @@ Run `python example.py`, then open `example.mid` in your MIDI player or DAW.
 
 The header selects **4/4**, **120 BPM**, melody channel **1**, beats channel **10**, and velocity **70%**. Each following bracket is one measure:
 
-- `|` separates beats; a 4/4 measure has four positions.
+- `|` separates beats; a 4/4 measure has four beats, each with one or more positions.
 - `+` plays notes and drums together.
 - `_` holds the previous event for another position.
 - `,` splits a beat equally. In `,E4+SD`, the first half is silent.
@@ -59,7 +59,7 @@ Every score starts with a header followed by at least one measure.
 [meter,tempo,melody-channel,beats-channel,velocity:gate]
 ```
 
-The beats channel and velocity/gate settings are optional independently; omit their commas when omitting the fields.
+The beats channel and velocity/gate settings are optional independently. Velocity and gate share one field: `@mf:80`, not `@mf,:80`. A gate-only field keeps its colon, as in `[4/4,120,1,:80]`. All header settings establish persistent defaults, including a bare dynamic such as `mf`.
 
 | Field | Accepted values | Default |
 |---|---|---|
@@ -89,7 +89,7 @@ Each bracket after the header is a measure. It must contain **exactly the numera
 | `[C4\|D4\|E4\|F4]` | Four beats |
 | `C4,D4` | Two equal positions within one beat |
 | `C4,D4,E4` | Three equal positions within one beat |
-| `C4,_` | One note held through both halves of a beat |
+| `C4,_` | One event occupying both halves; its gate determines how long it sounds |
 | `C4,` | Note, then silence |
 | `,C4` | Silence, then note |
 | `[C4\|\|E4\|]` | Notes on beats 1 and 3; silence on beats 2 and 4 |
@@ -109,7 +109,11 @@ For example, a 6/8 measure has six eighth-note beats and lasts three quarter-not
 
 `_` extends the entire previous event, including every chord member or drum hit. It can cross beat and measure boundaries. After a rest, it continues the silence; at the very start of a score, it is invalid.
 
+Gate is applied to the event's total duration after carries are added. For example, `C4.,_` occupies one beat but sounds for half a beat. Carries do not retrigger notes or change their velocity.
+
 Empty positions consume time without creating notes or resetting octave, velocity, or gate. Spaces around positions are ignored. A standalone `-` is invalid; a trailing `-` on a note means tenuto.
+
+The header must begin at the first character of the score; leading whitespace before it is not accepted. Whitespace between measures is allowed. Keep note names and their modifiers together, such as `C4@mf:~`. Settings and ramp markers must belong to a note or chord; standalone `@mf`, `:~`, `<`, and modifiers on `_` or empty positions are not supported.
 
 ## Notes and chords
 
@@ -120,6 +124,8 @@ C  C#  Db  D  D#  Eb  E  F  F#  Gb  G  G#  Ab  A  A#  Bb  B
 ```
 
 Examples: `C4`, `F#5`, `Bb3`. The starting octave is **4**. An explicit octave carries forward, including inside chords: `C4+E5+G` means `C4+E5+G5`. Drum hits do not change the octave.
+
+Use only the spellings listed above; alternatives such as `Cb` and `E#` are not implemented. C4 maps to MIDI pitch 60. Although the parser accepts single-digit octaves, MIDI output requires pitches in `0..127`; with this octave convention, stay between C0 and G9. Higher notes are not range-checked by the parser and can fail when the MIDI file is written.
 
 Join notes or drum codes with `+` to play them simultaneously. A chord occupies one position, and its modifiers apply to every member:
 
@@ -156,14 +162,14 @@ Drum codes use the beats channel from the header. They support the same rhythm, 
 Modifiers follow this order; each part except the note/chord is optional:
 
 ```text
-ramp + note/chord + velocity + ending
+optional ramp marker, then note/chord, then optional velocity, then optional ending
 ```
 
-Here `+` describes the order, not literal separators. For example, `<C4+E4+G4` starts a crescendo on a chord; `C4mf.` plays a mezzo-forte staccato note. Choose one ending: an articulation, a numeric gate, or marcato.
+Only chord members are joined with `+`. For example, `<C4+E4+G4` starts a crescendo on a chord; `C4mf.` plays a mezzo-forte staccato note. Choose one ending: a bare articulation, a persistent `:` gate or articulation, or marcato. Endings cannot be stacked: `C4:60.` and `C4:.^` are invalid.
 
 ### Velocity
 
-Use `@` for persistent velocity: `C4@90` sets 90%, and `SD@mf` sets mezzo-forte for this and subsequent events. A bare dynamic, such as `C4p` or `SDmf`, affects only that event. Afterward, the persistent velocity resumes.
+Use `@` for persistent velocity: `C4@90` sets 90%, and `SD@mf` sets mezzo-forte for this and subsequent events. A bare dynamic, such as `C4p` or `SDmf`, affects only that event. Afterward, the persistent velocity resumes outside a ramp; inside a ramp, unmarked events follow the interpolation described below. Numeric velocities always require `@` and are persistent.
 
 | Dynamic | Velocity (%) |
 |---|---:|
@@ -185,11 +191,13 @@ Gate controls sounding duration without changing the position's timing or the st
 | `'` | Staccatissimo | 25% | `C4'` |
 | `.` | Staccato | 50% | `C4f.` |
 | `-` | Tenuto | 95% | `C4-` |
-| `~` | Legato | 100% | `C4~` |
+| `~` | Full gate (legato preset) | 100% | `C4~` |
 | `:0..100` | Persistent exact gate | Specified % | `C4@73:60` |
 | `^` | Marcato, this event only | 70% | `SD@75^` |
 
 Prefix any of `'`, `.`, `-`, or `~` with `:` to make its gate persistent: `C4:'`, `C4:.`, `C4:-`, or `C4:~`. Marcato `^` is always incidental and also multiplies the event's velocity by 1.20, capped at 100%; `:^` is not supported.
+
+`~` makes the note last its full written duration; it does not add overlap or send a legato controller message. Marcato's velocity boost is applied after ramp interpolation and does not change the persistent velocity.
 
 ### Settings carry forward
 
@@ -229,7 +237,7 @@ These are complete scores to pass to `add_notes()`. The getting-started Python s
 [4/4,96,2,@60:95][C3+E3+G3|_|F3+A3+C4|_][G3+B3+D4|_|C3+E3+G3|_]
 ```
 
-Each chord lasts two beats, with a 95% gate.
+Each chord occupies two beats and sounds for 1.9 beats (95% of two beats).
 
 ### Jazz shuffle drums
 
@@ -263,12 +271,12 @@ Parsing is quiet by default. `debug=True` prints the parsed measures and events.
 
 ## Parse errors
 
-Invalid notation raises `ValueError`. Common causes and fixes:
+The parser reports the errors below with `ValueError`. It does not validate every MIDI limit or accidental spelling; unsupported spellings such as `Cb` currently raise `KeyError`, and some out-of-range values fail during MIDI serialization.
 
 | Problem | Fix |
 |---|---|
 | Missing header | Start with a header such as `[4/4,120,1]` |
-| Wrong number of beats | Use exactly the meter numerator's number of positions separated by `\|` in every measure |
+| Wrong number of beats | Use exactly the meter numerator's number of beats separated by `\|`; commas subdivide each beat |
 | Missing or nested measure brackets | Put each measure in its own `[ ... ]` group |
 | Standalone `-` | Leave the position empty for a rest |
 | `_` at the start of a score | Begin with a note, drum hit, or empty position |
