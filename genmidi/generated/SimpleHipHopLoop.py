@@ -24,5 +24,3 @@ add_notes(mf, 0, LOOP)
 
 with open("simple_hiphop_loop.mid", "wb") as f:
     mf.writeFile(f)
-
-print("Wrote simple_hiphop_loop.mid")

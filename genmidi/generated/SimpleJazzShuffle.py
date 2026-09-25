@@ -10,10 +10,10 @@ import midiutil
 from genmidi.main import create, add_notes
 
 LOOP = ('[4/4,120,1,@68:80]'
-        '[BD+RD,-,RD|-,SS+RD,-|BD+RD,-,RD|-,SS+RD,-]'
-        '[BD+RD,-,RD|-,SS+RD,-|BD+RD,-,RD|-,SS+RD,-]'
-        '[BD+RD,-,RD|-,SS+RD,-|BD+RD,-,RD|-,SS+RD,-]'
-        '[BD+RD,-,RD|-,SS+RD,-|BD+RD,-,RD|-,SS+RD,-]')
+        '[BD+RD,,RD|,SS+RD,|BD+RD,,RD|,SS+RD,]'
+        '[BD+RD,,RD|,SS+RD,|BD+RD,,RD|,SS+RD,]'
+        '[BD+RD,,RD|,SS+RD,|BD+RD,,RD|,SS+RD,]'
+        '[BD+RD,,RD|,SS+RD,|BD+RD,,RD|,SS+RD,]')
 
 mf = create(
     sign=midiutil.SHARPS,
@@ -25,5 +25,3 @@ add_notes(mf, 0, LOOP)
 
 with open("simple_jazz_shuffle.mid", "wb") as f:
     mf.writeFile(f)
-
-print("Wrote simple_jazz_shuffle.mid")
