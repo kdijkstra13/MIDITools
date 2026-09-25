@@ -67,8 +67,8 @@ The beats channel and velocity/gate settings are optional independently; omit th
 | Tempo | Positive integer BPM, in quarter notes per minute | Required |
 | Melody channel | `1..16` | Required |
 | Beats channel | `1..16` | `10` |
-| Velocity | `@0..100` or a named dynamic | `79` (MIDI velocity 100) |
-| Gate | `:0..100`, the percentage of a position's duration that sounds | `100` |
+| Velocity | `@0..100` or `@dynamic` (bare dynamics also accepted in headers) | `79` (MIDI velocity 100) |
+| Gate | `:0..100` or a prefixed articulation such as `:~` | `100` |
 
 Both channel fields use human numbering. Drum codes use the beats channel; notes use the melody channel. Channel 10 is the standard General MIDI percussion channel. Other channels allow custom routing.
 
@@ -78,7 +78,7 @@ Both channel fields use human numbering. Drum codes use the beats channel; notes
 | `[4/4,120,2,16]` | Melody channel 2, beats channel 16 |
 | `[4/4,120,2,@68]` | Initial velocity 68; default beats channel |
 | `[4/4,120,2,:80]` | Initial gate 80 |
-| `[4/4,120,2,10,mf:80]` | Both channels, named dynamic, and gate |
+| `[4/4,120,2,10,@mf:~]` | Both channels, mezzo-forte velocity, and full gate |
 
 ## Rhythm and silence
 
@@ -163,7 +163,7 @@ Here `+` describes the order, not literal separators. For example, `<C4+E4+G4` s
 
 ### Velocity
 
-Use a named dynamic directly after the event, or `@0..100` for a numeric percentage: `C4p`, `SDmf`, `C4+E4+G4@73`.
+Use `@` for persistent velocity: `C4@90` sets 90%, and `SD@mf` sets mezzo-forte for this and subsequent events. A bare dynamic, such as `C4p` or `SDmf`, affects only that event. Afterward, the persistent velocity resumes.
 
 | Dynamic | Velocity (%) |
 |---|---:|
@@ -178,7 +178,7 @@ Use a named dynamic directly after the event, or `@0..100` for a numeric percent
 
 ### Gate and accents
 
-Gate controls sounding duration without changing the position's timing or the start of the next event.
+Gate controls sounding duration without changing the position's timing or the start of the next event. Use `:` for persistence: `C4:60` sets a 60% gate, and `C4:~` sets full gate for this and subsequent events. Bare articulation symbols affect only their event.
 
 | Ending | Meaning | Gate | Example |
 |---|---|---:|---|
@@ -186,30 +186,38 @@ Gate controls sounding duration without changing the position's timing or the st
 | `.` | Staccato | 50% | `C4f.` |
 | `-` | Tenuto | 95% | `C4-` |
 | `~` | Legato | 100% | `C4~` |
-| `:0..100` | Exact gate | Specified % | `C4@73:60` |
+| `:0..100` | Persistent exact gate | Specified % | `C4@73:60` |
 | `^` | Marcato, this event only | 70% | `SD@75^` |
 
-Marcato also multiplies the event's velocity by 1.20, capped at 100%.
+Prefix any of `'`, `.`, `-`, or `~` with `:` to make its gate persistent: `C4:'`, `C4:.`, `C4:-`, or `C4:~`. Marcato `^` is always incidental and also multiplies the event's velocity by 1.20, capped at 100%; `:^` is not supported.
 
 ### Settings carry forward
 
-Header velocity and gate establish the starting values. A note-level velocity, articulation, or gate changes the setting for later events. Marcato affects only its own event.
+Header velocity and gate establish the starting values. Within the score, `@` updates persistent velocity and `:` updates persistent gate. Bare dynamics and articulations override only their own event, including all chord members and any carries of that event.
 
 ```text
-[4/4,120,1,@50:90][C4|D4@80|E4.|F4^][G4|_|_|_]
+[4/4,120,1,@50:90][C4@mf:~|D4p.|E4|F4:60][G4|_|_|_]
 ```
 
-Here `D4` changes velocity to 80, `E4.` changes gate to 50, and `F4^` receives a temporary accent. `G4` returns to velocity 80 and gate 50. Octave, velocity, and gate state start fresh on each `add_notes()` call.
+`C4@mf:~` sets persistent velocity 65 and gate 100. `D4p.` uses velocity 35 and gate 50 only for D4. E4 returns to 65 and 100. `F4:60` changes the persistent gate to 60, which G4 also uses. Octave, velocity, and gate state start fresh on each `add_notes()` call.
 
 ### Crescendo and diminuendo
 
-Prefix an event with `<` to start a crescendo or `>` to start a diminuendo. The ramp begins at the current velocity and ends at the next later event with an explicit dynamic or numeric velocity. Velocities are interpolated over musical time.
+Prefix an event with `<` to start a crescendo or `>` to start a diminuendo. Repeat the **same marker** on a later event to end it, and include a target dynamic or numeric velocity on that closing event. Velocities are interpolated over musical time.
 
 ```text
-[4/4,120,1,p][<C4|D4|E4|F4f][>G4|F4|E4|C4p]
+[4/4,120,1][<C4p|D4|E4|<F4f][>G4@80|F4|E4|>C4p]
 ```
 
-A crescendo must end at an equal or higher velocity; a diminuendo at an equal or lower velocity. Every ramp needs a later target, and a second ramp cannot start before the first ends. The target velocity remains active afterward.
+A dynamic on the opening event sets the starting level: `<C4p` starts at piano. If omitted, the persistent velocity is used. A crescendo must end at an equal or higher velocity; a diminuendo at an equal or lower velocity. Missing closing markers, closing markers without a target velocity, and mismatched markers raise `ValueError`. Close the current ramp before starting another on a separate event.
+
+Dynamics inside a ramp do not end it. They override their own event, and subsequent unmarked events continue along the ramp. For example, D4 is piano here, while E4 uses the interpolated velocity:
+
+```text
+[4/4,120,1][<C4@20|D4p|E4|<F4@80]
+```
+
+The persistence rules still apply. `<F4f` closes a crescendo, then later events resume the persistent velocity; `<F4@f` also keeps forte active afterward. Likewise, `<C4p` sets only the starting level, whereas `<C4@p` changes the persistent default too. A persistent dynamic inside a ramp overrides its event and updates the default used after the ramp; it does not change the interpolation of other ramp events.
 
 ## Examples
 
@@ -266,7 +274,7 @@ Invalid notation raises `ValueError`. Common causes and fixes:
 | `_` at the start of a score | Begin with a note, drum hit, or empty position |
 | Old ramp or accent symbols | Use `<C4`, `>C4`, and `C4^` |
 | Wrong modifier order, such as `C4-f` | Put velocity before the ending: `C4f-` |
-| Unfinished or overlapping ramp | Give the current ramp a later explicit target velocity |
+| Unfinished or mismatched ramp | Repeat the opening marker on a later event with a target velocity, such as `<F4f` |
 | Values outside the accepted ranges | Check the [header](#score-header) and [dynamics](#dynamics-and-articulation) tables |
 
 See [main.py](main.py) for the parser implementation.
