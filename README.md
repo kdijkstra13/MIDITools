@@ -23,7 +23,34 @@ The transcoder currently has these capabilities:
 * ./transcoder/gui.py - Python script transcoding and forwarding MIDI messages.
 
 # Gen MIDI
-Markup language to generate MIDI files for melody and chords. Use together with Synthesia.
+Xala Delta Music Markup Language (XDM) generates MIDI files for melody,
+chords, and drums. Save music directly in `.xdm` files and use `xdmgen`:
 
-* ./genmidi/main.py - Parser for converting drC's MML to a MIDI file.
-* ./genmidi/JustForYou.py - Python example of left-hand chords and right-hand melody.
+```sh
+python -m pip install .
+xdmgen genmidi/generated/HipHop.xdm -o hiphop.mid
+xdmgen genmidi/JustForYou.xdm --validate
+xdmgen --code '[t1/1][A+C+E]' -o chord.mid
+```
+
+Supports compact prefixed headers, local note expression, drums, and parallel
+voices. For example, these two voices play together in each group, and the
+groups play one after another:
+
+```text
+[t4/4s120@mf]
+[[m1][C4|D4|E4|F4][m2][C3|_|G3|_]]
+[[G4|F4|E4|D4][F3|_|G3|_]]
+```
+
+`[]` is a full silent measure. Headers set defaults; modifiers such as
+`C4mf'` affect only their own event. Ambiguous parallel structures and
+conflicting shared settings raise errors.
+
+See the [language reference and examples](genmidi/README.md), including
+[parallel voices](genmidi/README.md#parallel-voices), for the complete rules.
+
+* ./genmidi/main.py - XDM parser, validation, and MIDI API.
+* ./genmidi/cli.py - Separate command-line interface, installed as `xdmgen`.
+* ./genmidi/JustForYou.xdm - Left-hand chords and right-hand melody.
+* ./genmidi/generated/ - Standalone `.xdm` music examples.

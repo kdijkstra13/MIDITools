@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xdmgen"
+version = "0.1.0"
+description = "Xala Delta Music Markup Language validator and MIDI generator"
+requires-python = ">=3.8"
+dependencies = ["MIDIUtil>=1.2.1"]
+
+[project.scripts]
+xdmgen = "genmidi.cli:main"
+
+[tool.setuptools]
+packages = ["genmidi"]

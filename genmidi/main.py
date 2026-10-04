@@ -11,13 +11,15 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-Xala Delta's MIDI Markup Language (Xala Delta's MML)
+Xala Delta Music Markup Language (XDM)
 
 1) Create MIDI files for Synthesia using a MIDI markup language
 """
 import re
-from midiutil import MIDIFile
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
+
+if TYPE_CHECKING:
+    from midiutil import MIDIFile
 
 NOTES = {"C": 60,
          "C#": 61, "Db": 61,
@@ -65,7 +67,7 @@ DYNAMICS = {
     "fff": 100,
 }
 
-# Gate presets. A ':' prefix makes them persistent; bare presets are local.
+# Gate presets. Headers set defaults; note modifiers are local.
 ARTICULATIONS = {
     "'": 25,   # staccatissimo
     ".": 50,   # staccato
@@ -79,12 +81,14 @@ MARCATO_GATE = 70
 MARCATO_VELOCITY_FACTOR = 1.20
 
 
-def create_midi(track_names: List[str]) -> MIDIFile:
+def create_midi(track_names: List[str]) -> "MIDIFile":
     """Create a MIDI file and name its tracks.
 
-    Tempo and time signature are supplied by each MML score header in
+    Tempo and time signature are supplied by headers or defaults in
     add_notes(), not here.
     """
+    from midiutil import MIDIFile
+
     mf = MIDIFile(numTracks=len(track_names))
     for i, name in enumerate(track_names):
         mf.addTrackName(track=i, time=0, trackName=name)
@@ -92,6 +96,9 @@ def create_midi(track_names: List[str]) -> MIDIFile:
 
 
 def note_to_pitch(note: str, oct=None) -> Tuple[int, int]:
+    spelling = re.match(r"[A-G](?:#|b)?", note).group()
+    if spelling not in NOTES:
+        raise ValueError(f"Unsupported note spelling: {spelling!r}")
     if len(note) == 1 or (note[1] != "b" and note[1] != "#"):
         pitch = NOTES[note[:1]]
         if len(note) == 2:
@@ -106,6 +113,8 @@ def note_to_pitch(note: str, oct=None) -> Tuple[int, int]:
         else:
             octave = oct
         pitch = pitch + (octave - 4) * 12
+    if not 0 <= pitch <= 127:
+        raise ValueError(f"Note {note!r} is outside MIDI pitch range 0..127")
     return pitch, octave
 
 
@@ -124,8 +133,61 @@ def _midi_velocity(percent: float) -> int:
     return max(0, min(127, round(percent * 127 / 100)))
 
 
-def _parse_header(notes: str):
-    """Parse the mandatory MML score header.
+def _parse_prefixed_header(header: str, defaults=None):
+    """Read unordered, optionally comma-separated header fields."""
+    token = re.compile(
+        r"(?P<field>[mbts@:])\s*(?P<value>"
+        r"\d+\s*/\s*\d+|ppp|fff|pp|mp|mf|ff|p|f|\d+|['.~-])"
+    )
+    fields = {}
+    position = 0
+    while position < len(header):
+        separator = re.match(r"[\s,]*", header[position:])
+        position += separator.end()
+        if position == len(header):
+            break
+        match = token.match(header, position)
+        if match is None:
+            raise ValueError(f"Invalid header field at {header[position:]!r}")
+        field, value = match.group("field", "value")
+        value = re.sub(r"\s+", "", value)
+        if field in fields:
+            raise ValueError(f"Duplicate header field {field!r}")
+        if field == "t":
+            if "/" in value:
+                parts = value.split("/")
+            else:
+                raise ValueError("Timing needs a fraction, e.g. t4/4 or t12/8")
+            fields[field] = tuple(map(int, parts))
+        elif field in "mbs":
+            if not value.isdigit():
+                raise ValueError(f"Header field {field!r} needs an integer")
+            fields[field] = int(value)
+        elif field == "@":
+            fields[field] = (DYNAMICS[value] if value in DYNAMICS
+                             else _percentage(value, "velocity"))
+        else:
+            fields[field] = (ARTICULATIONS[value] if value in ARTICULATIONS
+                             else _percentage(value, "gate"))
+        position = match.end()
+    if not fields:
+        raise ValueError("Header must contain at least one setting")
+    defaults = defaults or {
+        "numerator": 4, "denominator": 4, "tempo": 120,
+        "channel": 0, "beats_channel": 9,
+        "velocity": DEFAULT_VELOCITY, "gate": DEFAULT_GATE,
+    }
+    numerator, denominator = fields.get(
+        "t", (defaults["numerator"], defaults["denominator"])
+    )
+    return (numerator, denominator, fields.get("s", defaults["tempo"]),
+            fields.get("m", defaults["channel"] + 1),
+            fields.get("b", defaults["beats_channel"] + 1),
+            fields.get("@", defaults["velocity"]), fields.get(":", defaults["gate"]))
+
+
+def _parse_single_header(notes: str, defaults=None):
+    """Parse one MML settings header.
 
     Channels: [4/4,192,4,10,@68:80] selects melody 4 and beats 10.
     The optional beats channel defaults to 10.
@@ -147,9 +209,8 @@ def _parse_header(notes: str):
         mf   -> optional named initial dynamic instead of @velocity
         :80  -> optional initial gate percentage (0..100)
 
-    Header velocity and gate become the initial persistent values for the
-    score. Note-level @velocity and :gate settings update those defaults;
-    bare dynamics and articulations override only their own event.
+    Header velocity and gate become the default values for the
+    score. All note-level modifiers override only their own event.
 
     MIDIUtil expects the time-signature denominator as log2(denominator), so
     the conversion happens here, at the boundary between human MML and MIDI.
@@ -161,32 +222,39 @@ def _parse_header(notes: str):
         r"\s*(?::\s*(\d{1,3}|['.~-]))?)?\s*\]",
         notes,
     )
+    prefixed = None
     if not match:
+        prefixed = re.match(r"^\[\s*([mbts@:][^\[\]]*)\]", notes)
+    if not match and not prefixed:
         raise ValueError(
             "MML must start with a header such as [4/4,192,4] "
             "or [4/4,192,4,@70:80]"
         )
 
-    numerator = int(match.group(1))
-    denominator = int(match.group(2))
-    tempo = int(match.group(3))
-    channel = int(match.group(4))
-
-    beats_channel = int(match.group(5)) if match.group(5) else 10
-    dynamic_velocity = match.group(6)
-    numeric_velocity = match.group(7)
-    gate_value = match.group(8)
-
-    velocity = DEFAULT_VELOCITY
-    if dynamic_velocity is not None:
-        velocity = DYNAMICS[dynamic_velocity]
-    elif numeric_velocity is not None:
-        velocity = _percentage(numeric_velocity, "velocity")
-
-    gate = DEFAULT_GATE
-    if gate_value is not None:
-        gate = (ARTICULATIONS[gate_value] if gate_value in ARTICULATIONS
-                else _percentage(gate_value, "gate"))
+    if prefixed:
+        numerator, denominator, tempo, channel, beats_channel, velocity, gate = (
+            _parse_prefixed_header(prefixed.group(1), defaults)
+        )
+        header_end = prefixed.end()
+    else:
+        numerator = int(match.group(1))
+        denominator = int(match.group(2))
+        tempo = int(match.group(3))
+        channel = int(match.group(4))
+        beats_channel = int(match.group(5)) if match.group(5) else 10
+        dynamic_velocity = match.group(6)
+        numeric_velocity = match.group(7)
+        gate_value = match.group(8)
+        velocity = DEFAULT_VELOCITY
+        if dynamic_velocity is not None:
+            velocity = DYNAMICS[dynamic_velocity]
+        elif numeric_velocity is not None:
+            velocity = _percentage(numeric_velocity, "velocity")
+        gate = DEFAULT_GATE
+        if gate_value is not None:
+            gate = (ARTICULATIONS[gate_value] if gate_value in ARTICULATIONS
+                    else _percentage(gate_value, "gate"))
+        header_end = match.end()
 
     if numerator < 1:
         raise ValueError("Time-signature numerator must be at least 1")
@@ -199,21 +267,8 @@ def _parse_header(notes: str):
     if not 1 <= beats_channel <= 16:
         raise ValueError("Beats MIDI channel must be between 1 and 16")
 
-    body = notes[match.end():].strip()
-    if not body:
-        raise ValueError("MML header must be followed by at least one measure")
-    if not (body.startswith("[") and body.endswith("]")):
-        raise ValueError("MML body must contain bracketed measures after the header")
-    if not re.fullmatch(r"(?:\[[^\[\]]*\]\s*)+", body):
-        raise ValueError("MML body must contain only bracketed measures")
+    body = notes[header_end:].strip()
     measures = re.findall(r"\[([^\[\]]*)\]", body)
-    for number, measure in enumerate(measures, 1):
-        beats = len(measure.split("|"))
-        if beats != numerator:
-            raise ValueError(
-                f"Measure {number} has {beats} beats; expected {numerator} "
-                f"for time signature {numerator}/{denominator}"
-            )
 
     return {
         "numerator": numerator,
@@ -229,12 +284,127 @@ def _parse_header(notes: str):
     }
 
 
+def _bracket_groups(text):
+    """Read balanced groups without silently discarding intervening text."""
+    groups = []
+    position = 0
+    while position < len(text):
+        if text[position].isspace():
+            position += 1
+            continue
+        if text[position] != "[":
+            raise ValueError("Expected a bracketed header, measure, or parallel group")
+        begin = position + 1
+        depth = 1
+        position += 1
+        while position < len(text) and depth:
+            if text[position] == "[":
+                depth += 1
+            elif text[position] == "]":
+                depth -= 1
+            position += 1
+        if depth:
+            raise ValueError("Unclosed bracket")
+        groups.append(text[begin:position - 1])
+    return groups
+
+
+def _is_header(group):
+    return re.match(r"\s*(?:[mbts@:]|\d+\s*/)", group) is not None
+
+
+def _measure(group, settings):
+    if not group.strip():
+        group = "|" * (settings["numerator"] - 1)
+    beats = len(group.split("|"))
+    if beats != settings["numerator"]:
+        raise ValueError(
+            f"Measure has {beats} beats; expected {settings['numerator']} "
+            f"for time signature {settings['numerator']}/{settings['denominator']}"
+        )
+    return group
+
+
+def _voice_score(measures, headers):
+    result = headers[0].copy()
+    result.update(measures=measures, measure_headers=headers)
+    return result
+
+
+def _parse_header(notes: str):
+    """Parse sequential measures or sequential groups of parallel measures."""
+    groups = _bracket_groups(notes)
+    parallel = any("[" in group for group in groups)
+    current = _parse_single_header("[m1]")
+    voices = []
+    states = []
+    awaiting_measure = False
+    group_count = 0
+    for group in groups:
+        if "[" not in group and _is_header(group):
+            if awaiting_measure:
+                raise ValueError("Each header must be followed by a measure or group")
+            current = _parse_single_header("[" + group + "]", current)
+            states = [_parse_single_header("[" + group + "]", state) for state in states]
+            awaiting_measure = True
+            continue
+        if parallel:
+            if "[" not in group:
+                raise ValueError("Cannot mix plain measures and parallel groups in one score")
+            children = _bracket_groups(group)
+            if any("[" in child for child in children):
+                raise ValueError("Parallel groups cannot be nested")
+            entries = []
+            pending = None
+            for child in children:
+                if _is_header(child):
+                    if pending is not None:
+                        raise ValueError("Each voice header must be followed by a measure")
+                    pending = child
+                else:
+                    entries.append((pending, child))
+                    pending = None
+            if pending is not None:
+                raise ValueError("Voice header has no following measure")
+            if len(entries) < 2:
+                raise ValueError("A parallel group must contain at least two voices")
+            if group_count and len(entries) != len(voices):
+                raise ValueError("Parallel groups must keep the same number of voices; use [] for silence")
+        else:
+            entries = [(None, group)]
+        if not voices:
+            voices = [([], []) for _ in entries]
+            states = [current.copy() for _ in entries]
+        for index, (local_header, measure) in enumerate(entries):
+            state = states[index].copy()
+            # Tempo and meter are shared; outer headers control their changes.
+            for field in ("tempo", "numerator", "denominator", "midi_denominator"):
+                state[field] = current[field]
+            if local_header is not None:
+                state = _parse_single_header("[" + local_header + "]", state)
+                if any(state[field] != current[field]
+                       for field in ("tempo", "numerator", "denominator")):
+                    raise ValueError("Voice headers cannot conflict with shared tempo or meter; use an outer header")
+            voices[index][0].append(_measure(measure, state))
+            voices[index][1].append(state.copy())
+            states[index] = state
+        group_count += 1
+        awaiting_measure = False
+    if not voices or awaiting_measure:
+        raise ValueError("A header must be followed by a measure or parallel group")
+    scores = [_voice_score(measures, headers) for measures, headers in voices]
+    result = scores[0].copy()
+    result["voices"] = scores
+    return result
+
+
+
 def _parse_sequence_note(sequence_note: str):
     """Parse one comma-separated note/chord token.
 
     Grammar (modifiers apply to the whole chord):
 
-        [RAMP] NOTE[+NOTE...][VELOCITY][ARTICULATION | :GATE | ^]
+        [RAMP_START] NOTE[+NOTE...][VELOCITY][ARTICULATION | :GATE | ^][RAMP_END]
 
     Examples:
         C4
@@ -251,12 +421,12 @@ def _parse_sequence_note(sequence_note: str):
         >C4          start diminuendo on C4
         C4^           marcato (one-note accent; does not carry)
 
-    @0..100 and @dynamic set persistent velocity; bare dynamics are local.
-    :0..100 and :articulation set persistent gate. Bare ', ., -, and ~
+    @0..100, @dynamic, and bare dynamics set local velocity.
+    :0..100 and :articulation set local gate. Bare ', ., -, and ~
     apply only to this event. Marcato ^ is always local.
-    Repeat the ramp marker on a later event with a target velocity to close
-    the ramp, e.g. <C4p ... <F4f. Interior dynamics override only their event
-    within the interpolation; @ also updates the persistent default.
+    Suffix the same ramp marker on a later event with a target velocity to
+    close the ramp, e.g. <C4p ... F4f<. Interior dynamics override only their event
+    within the interpolation; none update the header defaults.
     DRUM is one of the two-letter names in DRUMS and uses the header beats channel.
     """
     token = sequence_note.strip()
@@ -264,6 +434,7 @@ def _parse_sequence_note(sequence_note: str):
         return None
 
     ramp = None
+    ramp_end = None
     if token[0] in ("<", ">"):
         ramp = token[0]
         token = token[1:].strip()
@@ -271,6 +442,14 @@ def _parse_sequence_note(sequence_note: str):
             raise ValueError(
                 "A ramp marker must be attached to its first note, e.g. <C4 or >C4"
             )
+
+    if token[-1] in ("<", ">"):
+        ramp_end = token[-1]
+        token = token[:-1].strip()
+        if not token:
+            raise ValueError("A ramp endpoint must be attached to a note, e.g. C4p>")
+        if ramp is not None:
+            raise ValueError("An event cannot both start and end a ramp")
 
     # Parse the final duration/articulation modifier first, so forms such as
     # C4mf:60 and C4@73:60 leave the velocity suffix available to parse next.
@@ -292,13 +471,11 @@ def _parse_sequence_note(sequence_note: str):
         token = token[:-1]
 
     velocity = None
-    persistent_velocity = False
 
     # Numeric velocity is explicitly marked with @.
     percentage_velocity_match = re.search(r"@(\d{1,3})$", token)
     if percentage_velocity_match:
         velocity = _percentage(percentage_velocity_match.group(1), "velocity")
-        persistent_velocity = True
         token = token[:percentage_velocity_match.start()]
     else:
         # Named dynamics are lowercase suffixes written directly after the
@@ -306,7 +483,6 @@ def _parse_sequence_note(sequence_note: str):
         dynamic_match = re.search(r"(@?)(ppp|fff|pp|mp|mf|ff|p|f)$", token)
         if dynamic_match:
             velocity = DYNAMICS[dynamic_match.group(2)]
-            persistent_velocity = bool(dynamic_match.group(1))
             token = token[:dynamic_match.start()]
 
     note_names = [part.strip() for part in token.split("+")]
@@ -321,8 +497,8 @@ def _parse_sequence_note(sequence_note: str):
     return {
         "notes": note_names,
         "ramp": ramp,
+        "ramp_end": ramp_end,
         "velocity": velocity,
-        "persistent_velocity": persistent_velocity,
         "gate": gate,
         "articulation": articulation,
         "marcato": marcato,
@@ -355,8 +531,8 @@ def _resolve_ramp(v_list, t_list, start_index, start_time, start_velocity,
         v_list[i] = start_velocity + (target_velocity - start_velocity) * progress
 
 
-def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
-    """Add an MML score whose first bracket is a mandatory score header.
+def _add_voice(mf, track, header, time=0, debug=False):
+    """Add an MML score with optional setting headers before measures.
 
     Basic header syntax:
         [numerator/denominator,tempo,channel]
@@ -370,8 +546,8 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
         [4/4,192,4,mf:80]
         [4/4,192,4,:80]
 
-    Header velocity/gate are optional initial persistent settings. Note-level
-    modifiers can still change them later.
+    Optional headers before measures change defaults. Note-level modifiers
+    apply only to the complete event, including carries.
 
     Each '|' beat has the duration of the time-signature denominator:
     quarter-note units for /4, eighth-note units for /8, half-note units for
@@ -385,7 +561,6 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
     and empty slots for silence. Each measure must have exactly numerator
     beats. Set debug=True to print parsing diagnostics.
     """
-    header = _parse_header(notes)
     melodic_channel = header["channel"]
     beat_duration = 4 / header["denominator"]
 
@@ -419,11 +594,28 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
         for index in previous_event_indices:
             d_list[index] += duration
 
-    # Repeat the opening marker on a later event with a target velocity to close.
+    # Prefix opens a ramp; a matching suffix closes it on a later event.
     pending_ramp = None
 
     measures = header["measures"]
-    for measure in measures:
+    previous_header = None
+    for measure, header in zip(measures, header["measure_headers"]):
+        melodic_channel = header["channel"]
+        beat_duration = 4 / header["denominator"]
+        current_velocity = header["velocity"]
+        current_gate = header["gate"]
+        if previous_header is not None:
+            if header["tempo"] != previous_header["tempo"]:
+                mf.addTempo(track=track, time=time + tick, tempo=header["tempo"])
+            if (header["numerator"], header["denominator"]) != (
+                previous_header["numerator"], previous_header["denominator"]
+            ):
+                mf.addTimeSignature(
+                    track=track, time=time + tick, numerator=header["numerator"],
+                    denominator=header["midi_denominator"],
+                    clocks_per_tick=32, notes_per_quarter=8,
+                )
+        previous_header = header
         if debug:
             print(f"measure: {measure}")
         notes_per_measure = measure.split("|")
@@ -460,17 +652,7 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
                 ramp_to_resolve = None
                 if parsed["ramp"] is not None:
                     if pending_ramp is not None:
-                        if parsed["ramp"] != pending_ramp["direction"]:
-                            raise ValueError(
-                                f"Mismatched ramp endpoint: expected "
-                                f"{pending_ramp['direction']!r}, got {parsed['ramp']!r}"
-                            )
-                        if explicit_velocity is None:
-                            raise ValueError(
-                                "A ramp endpoint needs an explicit target velocity, "
-                                "e.g. <F4f or >C4@p"
-                            )
-                        ramp_to_resolve = pending_ramp
+                        raise ValueError("A ramp is already open; close it with a suffix first")
                     else:
                         pending_ramp = {
                             "direction": parsed["ramp"],
@@ -482,20 +664,31 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
                             ),
                         }
 
-                if parsed["persistent_velocity"]:
-                    current_velocity = explicit_velocity
+                if parsed["ramp_end"] is not None:
+                    if pending_ramp is None:
+                        raise ValueError("A ramp endpoint has no open ramp")
+                    if parsed["ramp_end"] != pending_ramp["direction"]:
+                        raise ValueError(
+                            f"Mismatched ramp endpoint: expected "
+                            f"{pending_ramp['direction']!r}, got {parsed['ramp_end']!r}"
+                        )
+                    if explicit_velocity is None:
+                        raise ValueError(
+                            "A ramp endpoint needs an explicit target velocity, "
+                            "e.g. F4f< or C4@p>"
+                        )
+                    ramp_to_resolve = pending_ramp
+
                 event_velocity = (
                     explicit_velocity if explicit_velocity is not None
                     else current_velocity
                 )
 
-                # Only ':' settings update the default gate. Bare presets
-                # apply to this complete event, including chords and drums.
-                if parsed["gate"] is not None:
-                    current_gate = parsed["gate"]
                 event_gate = (
                     ARTICULATIONS[parsed["articulation"]]
-                    if parsed["articulation"] is not None else current_gate
+                    if parsed["articulation"] is not None else (
+                        parsed["gate"] if parsed["gate"] is not None else current_gate
+                    )
                 )
 
                 event_indices = []
@@ -556,8 +749,8 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
     if pending_ramp is not None:
         direction = "crescendo" if pending_ramp["direction"] == "<" else "diminuendo"
         raise ValueError(
-            f"Unfinished {direction}: repeat {pending_ramp['direction']!r} "
-            "on a later note with a target velocity"
+            f"Unfinished {direction}: suffix {pending_ramp['direction']!r} "
+            "after a later note's modifiers with a target velocity"
         )
 
     for tick, pitch, duration, velocity, gate, marcato, channel in zip(
@@ -574,6 +767,59 @@ def add_notes(mf: MIDIFile, track: int, notes: str, time=0, debug=False):
             duration=duration * gate / 100,
             volume=_midi_velocity(velocity),
         )
+
+
+def parse_xdm(notes: str, track=0, time=0, debug=False):
+    """Validate XDM and return MIDI event calls, without requiring MIDIUtil."""
+    score = _parse_header(notes)
+
+    class Events:
+        def __init__(self):
+            self.calls = []
+
+        def addTempo(self, **values):
+            self.calls.append(("addTempo", values))
+
+        def addTimeSignature(self, **values):
+            self.calls.append(("addTimeSignature", values))
+
+        def addNote(self, **values):
+            self.calls.append(("addNote", values))
+
+    all_calls = []
+    previous_notes = {}
+    for voice_index, voice in enumerate(score["voices"]):
+        events = Events()
+        _add_voice(events, track, voice, time, debug)
+        voice_notes = {}
+        for method, values in events.calls:
+            if method == "addNote":
+                key = (values["channel"], values["pitch"])
+                begin = values["time"]
+                end = begin + values["duration"]
+                for other_begin, other_end in previous_notes.get(key, []):
+                    if max(begin, other_begin) < min(end, other_end):
+                        raise ValueError(
+                            "Parallel voices overlap on the same channel and pitch; "
+                            "use separate melody or beats channels"
+                        )
+                voice_notes.setdefault(key, []).append((begin, end))
+            if voice_index == 0 or method == "addNote":
+                all_calls.append((method, values))
+        for key, intervals in voice_notes.items():
+            previous_notes.setdefault(key, []).extend(intervals)
+    return all_calls
+
+
+def validate_xdm(notes: str):
+    """Validate syntax, musical structure, and MIDI pitch ranges."""
+    parse_xdm(notes)
+
+
+def add_notes(mf: "MIDIFile", track: int, notes: str, time=0, debug=False):
+    """Add a score, validating all voices before writing MIDI events."""
+    for method, values in parse_xdm(notes, track, time, debug):
+        getattr(mf, method)(**values)
 
 
 def create(sign, scale, track_names=None):
