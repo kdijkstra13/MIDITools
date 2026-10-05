@@ -16,6 +16,8 @@ Xala Delta Music Markup Language (XDM)
 1) Create MIDI files for Synthesia using a MIDI markup language
 """
 import re
+from enum import Enum, auto
+from .syntax import bracket_groups, header_fields, parse_event, parse_measure
 from typing import TYPE_CHECKING, List, Tuple
 
 if TYPE_CHECKING:
@@ -135,43 +137,17 @@ def _midi_velocity(percent: float) -> int:
 
 def _parse_prefixed_header(header: str, defaults=None):
     """Read unordered, optionally comma-separated header fields."""
-    token = re.compile(
-        r"(?P<field>[mbtsi@:])\s*(?P<value>"
-        r"\d+\s*/\s*\d+|ppp|fff|pp|mp|mf|ff|p|f|\d+|['.~-])"
-    )
+    # Syntax states validate fields; musical defaults are merged separately.
     fields = {}
-    position = 0
-    while position < len(header):
-        separator = re.match(r"[\s,]*", header[position:])
-        position += separator.end()
-        if position == len(header):
-            break
-        match = token.match(header, position)
-        if match is None:
-            raise ValueError(f"Invalid header field at {header[position:]!r}")
-        field, value = match.group("field", "value")
-        value = re.sub(r"\s+", "", value)
-        if field in fields:
-            raise ValueError(f"Duplicate header field {field!r}")
+    for field, value in header_fields(header).items():
         if field == "t":
-            if "/" in value:
-                parts = value.split("/")
-            else:
-                raise ValueError("Timing needs a fraction, e.g. t4/4 or t12/8")
-            fields[field] = tuple(map(int, parts))
+            fields[field] = tuple(map(int, value.split("/")))
         elif field in "mbsi":
-            if not value.isdigit():
-                raise ValueError(f"Header field {field!r} needs an integer")
             fields[field] = int(value)
         elif field == "@":
-            fields[field] = (DYNAMICS[value] if value in DYNAMICS
-                             else _percentage(value, "velocity"))
+            fields[field] = DYNAMICS[value] if value in DYNAMICS else _percentage(value, "velocity")
         else:
-            fields[field] = (ARTICULATIONS[value] if value in ARTICULATIONS
-                             else _percentage(value, "gate"))
-        position = match.end()
-    if not fields:
-        raise ValueError("Header must contain at least one setting")
+            fields[field] = ARTICULATIONS[value] if value in ARTICULATIONS else _percentage(value, "gate")
     defaults = defaults or {
         "numerator": 4, "denominator": 4, "tempo": 120,
         "channel": 0, "beats_channel": 9,
@@ -237,27 +213,7 @@ def _parse_single_header(notes: str, defaults=None):
 
 def _bracket_groups(text):
     """Read balanced groups without silently discarding intervening text."""
-    groups = []
-    position = 0
-    while position < len(text):
-        if text[position].isspace():
-            position += 1
-            continue
-        if text[position] != "[":
-            raise ValueError("Expected a bracketed header, measure, or parallel group")
-        begin = position + 1
-        depth = 1
-        position += 1
-        while position < len(text) and depth:
-            if text[position] == "[":
-                depth += 1
-            elif text[position] == "]":
-                depth -= 1
-            position += 1
-        if depth:
-            raise ValueError("Unclosed bracket")
-        groups.append(text[begin:position - 1])
-    return groups
+    return [group.text for group in bracket_groups(text)]
 
 
 def _is_header(group):
@@ -279,43 +235,66 @@ def _measure(group, settings):
 def _voice_score(measures, headers):
     result = headers[0].copy()
     result.update(measures=measures, measure_headers=headers)
+    # Parse each measure once, before resolving timing or writing MIDI.
+    result["parsed_measures"] = [
+        parse_measure(measure, DYNAMICS, ARTICULATIONS, DRUMS)
+        for measure in measures
+    ]
     return result
+
+
+class ScoreState(Enum):
+    """Headers require a measure before another header or end of score."""
+    READY = auto()
+    NEED_MEASURE = auto()
+
+
+class ScoreMode(Enum):
+    UNSET = auto()
+    SEQUENTIAL = auto()
+    PARALLEL = auto()
 
 
 def _parse_header(notes: str):
     """Parse sequential measures or sequential groups of parallel measures."""
-    groups = _bracket_groups(notes)
-    parallel = any("[" in group for group in groups)
+    groups = bracket_groups(notes)
+    mode = ScoreMode.UNSET
     current = _parse_single_header("[m1]")
     voices = []
     states = []
-    awaiting_measure = False
+    syntax_state = ScoreState.READY
     group_count = 0
-    for group in groups:
-        if "[" not in group and _is_header(group):
-            if awaiting_measure:
+    for node in groups:
+        group = node.text
+        if not node.children and _is_header(group):
+            if syntax_state == ScoreState.NEED_MEASURE:
                 raise ValueError("Each header must be followed by a measure or group")
             current = _parse_single_header("[" + group + "]", current)
             states = [_parse_single_header("[" + group + "]", state) for state in states]
-            awaiting_measure = True
+            syntax_state = ScoreState.NEED_MEASURE
             continue
-        if parallel:
-            if "[" not in group:
-                raise ValueError("Cannot mix plain measures and parallel groups in one score")
-            children = _bracket_groups(group)
-            if any("[" in child for child in children):
-                raise ValueError("Parallel groups cannot be nested")
+        next_mode = ScoreMode.PARALLEL if node.children else ScoreMode.SEQUENTIAL
+        if mode == ScoreMode.UNSET:
+            mode = next_mode
+        elif mode != next_mode:
+            raise ValueError("Cannot mix plain measures and parallel groups in one score")
+        if mode == ScoreMode.PARALLEL:
+            children = node.children
             entries = []
             pending = None
-            for child in children:
+            voice_state = ScoreState.READY
+            for child_node in children:
+                child = child_node.text
                 if _is_header(child):
-                    if pending is not None:
+                    if voice_state == ScoreState.NEED_MEASURE:
                         raise ValueError("Each voice header must be followed by a measure")
                     pending = child
+                    voice_state = ScoreState.NEED_MEASURE
                 else:
                     entries.append((pending, child))
                     pending = None
-            if pending is not None:
+                    voice_state = ScoreState.READY
+            if voice_state == ScoreState.NEED_MEASURE:
                 raise ValueError("Voice header has no following measure")
             if len(entries) < 2:
                 raise ValueError("A parallel group must contain at least two voices")
@@ -340,8 +319,8 @@ def _parse_header(notes: str):
             voices[index][1].append(state.copy())
             states[index] = state
         group_count += 1
-        awaiting_measure = False
-    if not voices or awaiting_measure:
+        syntax_state = ScoreState.READY
+    if not voices or syntax_state == ScoreState.NEED_MEASURE:
         raise ValueError("A header must be followed by a measure or parallel group")
     scores = [_voice_score(measures, headers) for measures, headers in voices]
     result = scores[0].copy()
@@ -380,80 +359,12 @@ def _parse_sequence_note(sequence_note: str):
     within the interpolation; none update the header defaults.
     DRUM is one of the two-letter names in DRUMS and uses the header beats channel.
     """
-    token = sequence_note.strip()
-    if token == "":
+    event = parse_event(sequence_note, DYNAMICS, ARTICULATIONS, DRUMS)
+    if event is None:
         return None
-
-    ramp = None
-    ramp_end = None
-    if token[0] in ("<", ">"):
-        ramp = token[0]
-        token = token[1:].strip()
-        if not token:
-            raise ValueError(
-                "A ramp marker must be attached to its first note, e.g. <C4 or >C4"
-            )
-
-    if token[-1] in ("<", ">"):
-        ramp_end = token[-1]
-        token = token[:-1].strip()
-        if not token:
-            raise ValueError("A ramp endpoint must be attached to a note, e.g. C4p>")
-        if ramp is not None:
-            raise ValueError("An event cannot both start and end a ramp")
-
-    # Parse the final duration/articulation modifier first, so forms such as
-    # C4mf:60 and C4@73:60 leave the velocity suffix available to parse next.
-    gate = None
-    articulation = None
-    marcato = False
-
-    gate_match = re.search(r":(\d{1,3}|['.~-])$", token)
-    if gate_match:
-        value = gate_match.group(1)
-        gate = (ARTICULATIONS[value] if value in ARTICULATIONS
-                else _percentage(value, "gate"))
-        token = token[:gate_match.start()]
-    elif token and token[-1] in ARTICULATIONS:
-        articulation = token[-1]
-        token = token[:-1]
-    elif token.endswith("^"):
-        marcato = True
-        token = token[:-1]
-
-    velocity = None
-
-    # Numeric velocity is explicitly marked with @.
-    percentage_velocity_match = re.search(r"@(\d{1,3})$", token)
-    if percentage_velocity_match:
-        velocity = _percentage(percentage_velocity_match.group(1), "velocity")
-        token = token[:percentage_velocity_match.start()]
-    else:
-        # Named dynamics are lowercase suffixes written directly after the
-        # note/chord. Keep this case-sensitive: note names are uppercase.
-        dynamic_match = re.search(r"(@?)(ppp|fff|pp|mp|mf|ff|p|f)$", token)
-        if dynamic_match:
-            velocity = DYNAMICS[dynamic_match.group(2)]
-            token = token[:dynamic_match.start()]
-
-    note_names = [part.strip() for part in token.split("+")]
-    if not note_names or any(not note for note in note_names):
-        raise ValueError(f"Invalid note/chord token: {sequence_note!r}")
-
-    note_pattern = re.compile(r"^[A-G](?:#|b)?\d?$")
-    for note in note_names:
-        if note not in DRUMS and not note_pattern.match(note):
-            raise ValueError(f"Invalid note/drum {note!r} in token {sequence_note!r}")
-
-    return {
-        "notes": note_names,
-        "ramp": ramp,
-        "ramp_end": ramp_end,
-        "velocity": velocity,
-        "gate": gate,
-        "articulation": articulation,
-        "marcato": marcato,
-    }
+    if event.hold:
+        raise ValueError("Carry '_' belongs to a measure position")
+    return event.legacy()
 
 
 def _resolve_ramp(v_list, t_list, start_index, start_time, start_velocity,
@@ -544,7 +455,7 @@ def _add_voice(mf, track, header, time=0, debug=False):
 
     measures = header["measures"]
     previous_header = None
-    for measure, header in zip(measures, header["measure_headers"]):
+    for measure, syntax, header in zip(measures, header["parsed_measures"], header["measure_headers"]):
         melodic_channel = header["channel"]
         beat_duration = 4 / header["denominator"]
         current_velocity = header["velocity"]
@@ -570,34 +481,23 @@ def _add_voice(mf, track, header, time=0, debug=False):
         previous_header = header
         if debug:
             print(f"measure: {measure}")
-        notes_per_measure = measure.split("|")
-
-        for note_per_measure in notes_per_measure:
-            if debug:
-                print(f"notes: {note_per_measure}")
-            sequence_notes = note_per_measure.split(",")
-
-            duration = beat_duration / len(sequence_notes)
+        # Syntax is validated already. This layer resolves octave inheritance,
+        # defaults, holds, and ramps without reparsing note strings.
+        for positions in syntax.beats:
+            duration = beat_duration / len(positions)
             sub_tick = 0
-
-            for sequence_note in sequence_notes:
-                if debug:
-                    print(f"note: {sequence_note}")
-                token = sequence_note.strip()
-
-                if not token:
+            for event in positions:
+                if event is None:
                     previous_event_indices = []
                     sub_tick += duration
                     continue
-
-                if token == "_":
+                if event.hold:
                     if previous_event_indices is None:
                         raise ValueError("Carry '_' has no previous event to extend")
                     extend_previous_event(duration)
                     sub_tick += duration
                     continue
-
-                parsed = _parse_sequence_note(sequence_note)
+                parsed = event.legacy()
                 event_time = tick + sub_tick
                 explicit_velocity = parsed["velocity"]
 

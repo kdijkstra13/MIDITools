@@ -443,3 +443,24 @@ The parser reports the errors below with `ValueError`, including unsupported acc
 | Values outside the accepted ranges | Check the [header](#score-header) and [dynamics](#dynamics-and-articulation) tables |
 
 See [main.py](main.py) for the parser implementation.
+
+### Parser implementation
+
+`syntax.py` reads XDM from left to right. Its tokenizer produces tokens with
+source columns. `HeaderState` handles prefixed settings and timing fractions;
+`EventState` enforces pitch, chord, velocity, ending, and ramp-marker order.
+A bracket stack records score and parallel-voice contexts and rejects deeper
+nesting. `ScoreState` requires each header to be followed by a measure, while
+`ScoreMode` prevents mixing sequential measures and parallel groups.
+
+Measures contain beats of parsed `Event` objects, holds, or empty positions.
+The musical-resolution layer in `main.py` consumes those objects to apply
+header defaults, inherited octaves, durations, holds, and dynamic ramps before
+MIDI calls are replayed. Event modifiers remain local to their note or chord.
+Syntax errors include a column relative to the header or event being parsed.
+
+Run the parser and CLI checks from the parent directory:
+
+```sh
+python -m unittest genmidi.test_headers genmidi.test_syntax genmidi.test_cli
+```
