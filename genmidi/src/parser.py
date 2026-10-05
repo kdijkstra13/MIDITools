@@ -1,4 +1,4 @@
-"""XDM syntax machines. Musical defaults and MIDI timing belong to main.py.
+"""XDM syntax machines. Musical defaults and MIDI timing belong to xdm.py.
 
 Every machine consumes input left to right. Tokens retain their source column;
 no parser removes suffixes or guesses structure by searching the whole score.

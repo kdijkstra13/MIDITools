@@ -1,10 +1,10 @@
-"""Command-line interface for XDM; language parsing lives in main.py."""
+"""Command-line interface for XDM; language parsing lives in xdm.py."""
 import argparse
 from io import BytesIO
 from pathlib import Path
 import sys
 
-from .main import create_midi, parse_xdm, validate_xdm
+from .src.xdm import create_midi, parse_xdm, validate_xdm
 
 
 def main(argv=None):

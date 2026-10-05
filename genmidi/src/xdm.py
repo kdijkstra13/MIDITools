@@ -17,7 +17,7 @@ Xala Delta Music Markup Language (XDM)
 """
 import re
 from enum import Enum, auto
-from .syntax import bracket_groups, header_fields, parse_event, parse_measure
+from .parser import bracket_groups, header_fields, parse_event, parse_measure
 from typing import TYPE_CHECKING, List, Tuple
 
 if TYPE_CHECKING:

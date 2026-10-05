@@ -10,7 +10,7 @@ requires-python = ">=3.8"
 dependencies = ["MIDIUtil>=1.2.1"]
 
 [project.scripts]
-xdmgen = "genmidi.cli:main"
+xdmgen = "genmidi.xdmgen:main"
 
 [tool.setuptools]
-packages = ["genmidi"]
+packages = ["genmidi", "genmidi.src"]

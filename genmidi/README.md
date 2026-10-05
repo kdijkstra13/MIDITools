@@ -67,7 +67,7 @@ requires `-o`; `--validate` and `-o` cannot be combined. Input and output
 must differ. Validation prints `Valid XDM` and exits with status 0; invalid
 XDM or I/O errors exit with status 1, and incorrect CLI arguments with 2.
 
-You can also run `python -m genmidi.cli` from the repository root.
+You can also run `python -m genmidi.xdmgen` from the repository root.
 Validation works without MIDIUtil; generating MIDI requires it.
 
 ## Rhythm and silence
@@ -402,7 +402,7 @@ the features introduced above.
 
 ## Python API
 
-Import these functions from `genmidi.main` when running from the repository root.
+Import these functions from `genmidi.src.xdm` when running from the repository root.
 
 | Function | Purpose |
 |---|---|
@@ -442,11 +442,11 @@ The parser reports the errors below with `ValueError`, including unsupported acc
 | Deeper nesting or mixed plain measures and parallel groups | Use consecutive groups containing two or more measures |
 | Values outside the accepted ranges | Check the [header](#score-header) and [dynamics](#dynamics-and-articulation) tables |
 
-See [main.py](main.py) for the parser implementation.
+See [xdm.py](src/xdm.py) for the parser implementation.
 
 ### Parser implementation
 
-`syntax.py` reads XDM from left to right. Its tokenizer produces tokens with
+`parser.py` reads XDM from left to right. Its tokenizer produces tokens with
 source columns. `HeaderState` handles prefixed settings and timing fractions;
 `EventState` enforces pitch, chord, velocity, ending, and ramp-marker order.
 A bracket stack records score and parallel-voice contexts and rejects deeper
@@ -454,7 +454,7 @@ nesting. `ScoreState` requires each header to be followed by a measure, while
 `ScoreMode` prevents mixing sequential measures and parallel groups.
 
 Measures contain beats of parsed `Event` objects, holds, or empty positions.
-The musical-resolution layer in `main.py` consumes those objects to apply
+The musical-resolution layer in `xdm.py` consumes those objects to apply
 header defaults, inherited octaves, durations, holds, and dynamic ramps before
 MIDI calls are replayed. Event modifiers remain local to their note or chord.
 Syntax errors include a column relative to the header or event being parsed.
@@ -462,5 +462,5 @@ Syntax errors include a column relative to the header or event being parsed.
 Run the parser and CLI checks from the parent directory:
 
 ```sh
-python -m unittest genmidi.test_headers genmidi.test_syntax genmidi.test_cli
+python -m unittest genmidi.tests.test_headers genmidi.tests.test_syntax genmidi.tests.test_cli
 ```

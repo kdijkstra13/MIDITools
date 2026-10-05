@@ -1,8 +1,8 @@
-"""Transition tests: python -m unittest genmidi.test_syntax."""
+"""Transition tests: python -m unittest genmidi.tests.test_syntax."""
 import unittest
 
-from genmidi.main import ARTICULATIONS, DRUMS, DYNAMICS, parse_xdm
-from genmidi.syntax import bracket_groups, header_fields, parse_event, parse_measure
+from genmidi.src.xdm import ARTICULATIONS, DRUMS, DYNAMICS, parse_xdm
+from genmidi.src.parser import bracket_groups, header_fields, parse_event, parse_measure
 
 
 class SyntaxTests(unittest.TestCase):

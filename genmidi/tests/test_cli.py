@@ -1,4 +1,4 @@
-"""CLI checks: python -m unittest genmidi.test_cli."""
+"""CLI checks: python -m unittest genmidi.tests.test_cli."""
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -6,8 +6,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from genmidi.cli import main
-from genmidi.main import validate_xdm
+from genmidi.xdmgen import main
+from genmidi.src.xdm import validate_xdm
 
 
 class CLITests(unittest.TestCase):
@@ -18,7 +18,7 @@ class CLITests(unittest.TestCase):
         return result, stdout.getvalue(), stderr.getvalue()
 
     def test_validate_literal_without_midi_dependency(self):
-        with patch("genmidi.cli.create_midi", side_effect=AssertionError("must not create MIDI")):
+        with patch("genmidi.xdmgen.create_midi", side_effect=AssertionError("must not create MIDI")):
             result, stdout, stderr = self.run_cli(["--code", "[t1/1][A+C+E]", "--validate"])
         self.assertEqual(result, 0)
         self.assertIn("Valid XDM", stdout)
@@ -69,7 +69,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(error.exception.code, 2)
 
     def test_all_xdm_examples(self):
-        for path in Path(__file__).parent.rglob("*.xdm"):
+        for path in Path(__file__).parents[1].rglob("*.xdm"):
             with self.subTest(path=path):
                 validate_xdm(path.read_text(encoding="utf-8"))
 

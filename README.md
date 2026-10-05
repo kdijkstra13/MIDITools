@@ -50,7 +50,7 @@ conflicting shared settings raise errors.
 See the [language reference and examples](genmidi/README.md), including
 [parallel voices](genmidi/README.md#parallel-voices), for the complete rules.
 
-* ./genmidi/main.py - XDM parser, validation, and MIDI API.
-* ./genmidi/cli.py - Separate command-line interface, installed as `xdmgen`.
+* ./genmidi/src/xdm.py - XDM parser, validation, and MIDI API.
+* ./genmidi/xdmgen.py - Separate command-line interface, installed as `xdmgen`.
 * ./genmidi/JustForYou.xdm - Left-hand chords and right-hand melody.
 * ./genmidi/generated/ - Standalone `.xdm` music examples.

@@ -1,7 +1,7 @@
-"""Run from the repository root: python -m unittest genmidi.test_headers."""
+"""Run from the repository root: python -m unittest genmidi.tests.test_headers."""
 import unittest
 
-from genmidi.main import _parse_header, add_notes
+from genmidi.src.xdm import _parse_header, add_notes
 
 
 class RecordingMIDI:
