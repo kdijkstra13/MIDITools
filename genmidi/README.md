@@ -1,8 +1,39 @@
 # Xala Delta Music Markup Language (XDM)
 
-Write melodies, chords, and drum patterns as text, then turn them into MIDI files with Python.
+Write music as text, then turn it into a MIDI file.
 
-## Getting started
+## Basic structure and notes
+
+A score is a sequence of bracketed measures. Each measure contains beats
+separated by `|`. In the default 4/4 meter, write four beats per measure:
+
+```text
+[@mf:~]
+[C4|D4|E4|F4]
+[G4|A4|B4|C5]
+```
+
+Each note has a name and an explicit octave: `C4`, `D4`, or `C5`.
+C4 is middle C (MIDI pitch 60). One note in each position lasts one beat
+in this example. Measures play in order.
+
+The first bracket is a **header**. Here, `@mf` sets mezzo-forte velocity
+and `:~` sets full sounding length. These defaults apply to every following
+note until another header changes them. The default meter is 4/4 and the
+default tempo is 120 BPM.
+
+Use this common practice throughout a score:
+
+- Write the octave on every melodic note, including every chord member.
+- Set velocity and sounding length in headers instead of repeating them on notes.
+- Use `^` for an occasional accent, such as `E4^`.
+- Choose named dynamics and articulation symbols, or percentages, and keep
+  that choice consistent within an example or passage.
+
+The examples below introduce one feature at a time. Most use named dynamics
+and articulation symbols; exact percentages appear in their own section.
+
+## Save and play a score
 
 Install from the repository root:
 
@@ -10,231 +41,278 @@ Install from the repository root:
 python -m pip install .
 ```
 
-Save raw XDM text in a UTF-8 file named `example.xdm`:
-
-```text
-[m1b10t4/4s120@70]
-[C4+BD|D4+CH|E4+SD|F4+CH]
-[G4+BD|_|,E4+SD|C4+CH]
-```
-
-Generate `example.mid`, or validate without writing output:
+Save the basic score above as UTF-8 text in `example.xdm`, then generate MIDI:
 
 ```sh
 xdmgen example.xdm
+```
+
+This writes `example.mid`. Open it in your MIDI player or DAW.
+To choose an output file or check the score without writing MIDI:
+
+```sh
 xdmgen example.xdm -o performance.mid
 xdmgen example.xdm --validate
 ```
 
-Literal XDM text can replace file input:
+You can also supply the score directly:
 
 ```sh
-xdmgen --code '[t1/1][A+C+E]' -o chord.mid
-xdmgen --code '[t1/1][[A][C][E]]' --validate
+xdmgen --code '[@mf:~][C4|D4|E4|F4]' -o melody.mid
 ```
 
-Quote literal text so the shell preserves brackets, spaces, and ramp markers.
-File input and `--code` are mutually exclusive. Literal MIDI generation requires
-`-o`; `--validate` and `-o` cannot be combined. Input and output must differ.
-Validation reports `Valid XDM` and exits with status 0; invalid XDM or I/O errors
-exit with status 1. Incorrect CLI arguments exit with status 2.
+Quote literal text so the shell preserves its brackets and symbols.
+File input and `--code` are mutually exclusive. Literal MIDI generation
+requires `-o`; `--validate` and `-o` cannot be combined. Input and output
+must differ. Validation prints `Valid XDM` and exits with status 0; invalid
+XDM or I/O errors exit with status 1, and incorrect CLI arguments with 2.
 
-The CLI lives in [cli.py](cli.py); parsing and validation live in [main.py](main.py).
-You can also run `python -m genmidi.cli` from the repository root. This form
-supports validation without installing MIDIUtil; generating MIDI requires it.
-Open generated MIDI files in your MIDI player or DAW.
-
-The header selects **4/4**, **120 BPM**, melody channel **1**, beats channel **10**, and velocity **70%**. Each following bracket is one measure:
-
-- `|` separates beats; a 4/4 measure has four beats, each with one or more positions.
-- `+` plays notes and drums together.
-- `_` holds the previous event for another position.
-- `,` splits a beat equally. In `,E4+SD`, the first half is silent.
-
-Change the pitches, add another measure, or use the reference below to add expression.
-
-## Contents
-
-- [Score header](#score-header)
-- [Rhythm and silence](#rhythm-and-silence)
-- [Notes and chords](#notes-and-chords)
-- [Parallel voices](#parallel-voices)
-- [Drum codes](#drum-codes)
-- [Dynamics and articulation](#dynamics-and-articulation)
-- [Examples](#examples)
-- [Python API](#python-api)
-- [Parse errors](#parse-errors)
-
-## Score header
-
-A score contains measures, each optionally preceded by a header. Without an initial header, the defaults below apply.
-
-### Prefixed headers
-
-Use letter prefixes to write settings in any order. Commas and spaces are
-optional, so these headers are equivalent:
-
-```text
-[m2,b10,t4/4,s120,@mf,:-]
-[m2b10t4/4s120@mf:-]
-```
-
-| Prefix | Meaning | Default | Examples |
-|---|---|---|---|
-| `m` | Melody channel, `1..16` | `1` | `m2` |
-| `b` | Beats channel, `1..16` | `10` | `b10` |
-| `t` | Time signature | `4/4` | `t4/4`, `t6/8`, `t12/8` |
-| `s` | Speed in quarter-note BPM, positive integer | `120` | `s96` |
-| `@` | Velocity percentage or dynamic | `79` | `@20`, `@mf` |
-| `:` | Gate percentage or articulation | `100` | `:80`, `:-` |
-
-Time signatures always require a slash: `t4/4`, `t6/8`, or `t12/8`.
-Each prefix may occur only once. Unknown fields, duplicate fields, and
-out-of-range settings are errors. Include at least one setting in a header.
-A header must be followed by a measure. Omitted fields retain the previous
-header settings; the first header uses the defaults above.
-
-Headers may appear before any measure:
-
-```text
-[m2b10t4/4@20:80][C4@mf:-|D4|E4|F4]
-[@70][G4|A4|B4|C5]
-[s96t3/4][C4|E4|G4]
-```
-
-Only C4 in the first measure uses mezzo-forte and tenuto. D4, E4, and F4
-use the header's velocity 20 and gate 80. The next header changes velocity
-to 70; channel and gate remain unchanged. The final header changes tempo
-and meter. Headers consume no musical time.
-
-### Positional headers (also supported)
-
-```text
-[meter,tempo,melody-channel]
-[meter,tempo,melody-channel,beats-channel]
-[meter,tempo,melody-channel,beats-channel,velocity:gate]
-```
-
-The beats channel and velocity/gate settings are optional independently. Velocity and gate share one field: `@mf:80`, not `@mf,:80`. A gate-only field keeps its colon, as in `[4/4,120,1,:80]`. All header settings establish defaults, including a bare dynamic such as `mf`.
-
-| Field | Accepted values | Default |
-|---|---|---|
-| Meter | Positive numerator / power-of-two denominator, such as `4/4` or `6/8` | Required |
-| Tempo | Positive integer BPM, in quarter notes per minute | Required |
-| Melody channel | `1..16` | Required |
-| Beats channel | `1..16` | `10` |
-| Velocity | `@0..100` or `@dynamic` (bare dynamics also accepted in headers) | `79` (MIDI velocity 100) |
-| Gate | `:0..100` or a prefixed articulation such as `:~` | `100` |
-
-Both channel fields use human numbering. Drum codes use the beats channel; notes use the melody channel. Channel 10 is the standard General MIDI percussion channel. Other channels allow custom routing.
-
-| Header example | Meaning |
-|---|---|
-| `[4/4,120,2]` | Melody channel 2; default beats, velocity, and gate |
-| `[4/4,120,2,16]` | Melody channel 2, beats channel 16 |
-| `[4/4,120,2,@68]` | Initial velocity 68; default beats channel |
-| `[4/4,120,2,:80]` | Initial gate 80 |
-| `[4/4,120,2,10,@mf:~]` | Both channels, mezzo-forte velocity, and full gate |
+You can also run `python -m genmidi.cli` from the repository root.
+Validation works without MIDIUtil; generating MIDI requires it.
 
 ## Rhythm and silence
 
-Each note-containing bracket is a measure; an outer bracket can group measures into parallel voices. A nonempty measure must contain **exactly the numerator's number of beats**, including empty beats. Use `|` between beats and commas to divide a beat into equal positions. `[]` supplies a whole silent measure automatically.
+### Shorter notes
 
-| Notation | Meaning |
-|---|---|
-| `[C4\|D4\|E4\|F4]` | Four beats |
-| `C4,D4` | Two equal positions within one beat |
-| `C4,D4,E4` | Three equal positions within one beat |
-| `C4,_` | One event occupying both halves; its gate determines how long it sounds |
-| `C4,` | Note, then silence |
-| `,C4` | Silence, then note |
-| `[C4\|\|E4\|]` | Notes on beats 1 and 3; silence on beats 2 and 4 |
-| `[\|\|\|]` | A silent four-beat measure |
-| `[]` | A full silent measure in the current meter |
-
-A beat's duration comes from the meter denominator: quarter note in 4/4, eighth note in 6/8, half note in 3/2. In MIDI quarter-note units:
+Commas divide a beat into equal positions. Two positions make two half-beat
+notes; three positions make three equal notes:
 
 ```text
-position duration = (4 / denominator) / positions in the beat
+[@mf:~]
+[C4,D4|E4|F4,G4|A4]
 ```
 
-For example, a 6/8 measure has six eighth-note beats and lasts three quarter-note units:
+Only beats 1 and 3 are divided here. The measure still has four beats.
+
+### Rests
+
+Leave a beat or position empty for silence:
 
 ```text
-[6/8,120,1][C4|D4|E4|F4|G4|A4]
+[@mf:~]
+[C4||E4|]
 ```
 
-`_` extends the entire previous event, including every chord member or drum hit. It can cross beat and measure boundaries within the same voice. After a rest, it continues the silence; at the very start of a voice, it is invalid.
+Beats 2 and 4 are rests. Within a divided beat, `C4,` means a note followed
+by silence, and `,C4` means silence followed by a note.
+`[]` is a whole silent measure in the current meter.
 
-Gate is applied to the event's total duration after carries are added. For example, `C4.,_` occupies one beat but sounds for half a beat. Carries do not retrigger notes or change their velocity.
+### Longer notes
 
-Empty positions consume time without creating notes or resetting octave, velocity, or gate. Spaces around positions are ignored. A standalone `-` is invalid; a trailing `-` on a note means tenuto.
-
-Leading whitespace and whitespace between headers and measures are allowed. Keep note names and their modifiers together, such as `C4@mf:~`. Settings and ramp markers must belong to a note or chord; standalone `@mf`, `:~`, `<`, and modifiers on `_` or empty positions are not supported.
-
-## Parallel voices
-
-Wrap two or more measures in an outer bracket to play independent voices
-simultaneously. Consecutive outer groups play sequentially:
+Use `_` to continue the previous note without playing it again:
 
 ```text
-[t4/4s120@mf]
-[[m1][C4|D4|E4|F4][m2][C3|_|G3|_]]
-[[G4|F4|E4|D4][F3|_|G3|_]]
+[@mf:~]
+[C4|_|E4|_]
 ```
 
-All measures in a group start together and use the shared meter, so they
-have the same written duration. Each child measure is one voice. A header
-inside a group applies to the following voice only. Voice positions identify
-the same voices in subsequent groups; their channels, velocity/gate defaults,
-octaves, holds, and ramps remain independent and carry forward.
+Each note lasts two beats. A hold can continue across a measure boundary.
+It extends the entire previous event, including all chord members or drum
+hits. After a rest it continues silence; at the start of a voice it is invalid.
 
-An outer header updates all voices; omitted channel and expression settings
-retain each voice's existing values. Tempo and meter can change only through
-an outer header. Local headers may repeat the shared tempo/meter but may not
-conflict with them. Note modifiers still apply only to their own event.
+### Sounding length
 
-Use `[]` for a full silent measure in a voice:
+The header's gate controls how much of a note's written duration sounds.
+It does not move the next note. For a short, detached passage:
 
 ```text
-[[][]][[][C4|D4|E4|F4]]
+[@mf:']
+[C4|D4|E4|F4]
 ```
 
-The first group is silent; the second plays notes in voice 2. Silence clears
-that voice's previous event, so a subsequent `_` continues silence.
-
-Ambiguous or unsupported structures raise `ValueError`: deeper nesting,
-groups with fewer than two voices, changing the number of voices between
-groups, mixing plain measures with parallel groups in one score, headers
-without a following measure/group, and conflicting shared tempo or meter.
-Use empty measures to retain a silent voice's position. Overlapping notes
-in different voices with the same MIDI channel and pitch also raise an error;
-assign separate channels when independent note endings are needed. All voices
-are validated before MIDI events are written.
+The staccatissimo setting `:'` sounds each note for one quarter of its
+position. Full gate `:~` sounds the whole position. Holds extend the written
+duration first, then the gate applies to that total.
 
 ## Notes and chords
 
-Use uppercase note names, an optional accidental, and an optional single-digit octave:
+Use uppercase note names. Sharps and flats come before the octave:
 
 ```text
-C  C#  Db  D  D#  Eb  E  F  F#  Gb  G  G#  Ab  A  A#  Bb  B
+[@mf:~]
+[C4|F#4|Bb4|C5]
 ```
 
-Examples: `C4`, `F#5`, `Bb3`. The starting octave is **4**. An explicit octave carries forward, including inside chords: `C4+E5+G` means `C4+E5+G5`. Drum hits do not change the octave.
+Supported pitch spellings are C, C#/Db, D, D#/Eb, E, F, F#/Gb, G, G#/Ab,
+A, A#/Bb, and B. Alternatives such as Cb and E# are not implemented.
+Octaves are single digits, and pitches must remain in MIDI range 0..127
+(C0 through G9).
 
-Use only the spellings listed above; alternatives such as `Cb` and `E#` are not implemented. C4 maps to MIDI pitch 60. Although the parser accepts single-digit octaves, MIDI output requires pitches in `0..127`; with this octave convention, stay between C0 and G9. The parser rejects pitches outside MIDI range `0..127`.
-
-Join notes or drum codes with `+` to play them simultaneously. A chord occupies one position, and its modifiers apply to every member:
+Join notes with `+` to play a chord in one position:
 
 ```text
-C4+E4+G4
-C4+BD
-C4+E4+G4mf:80
+[@mf:~]
+[C4+E4+G4|_|C4+F4+A4|_]
 ```
+
+Each chord lasts two beats. Every member uses the header's velocity and gate.
+
+## Score header
+
+Headers use prefixed fields in any order. Commas and spaces are optional.
+Start with just the settings you need:
+
+```text
+[s96@mf:~]
+[C4|D4|E4|F4]
+```
+
+This changes the tempo to 96 BPM. Unspecified settings use their defaults,
+or inherit their previous values when a header appears later in the score.
+
+| Prefix | Meaning | Initial default | Example |
+|---|---|---|---|
+| `t` | Meter: positive numerator / power-of-two denominator | `4/4` | `t3/4` |
+| `s` | Tempo in quarter-note BPM, positive integer | `120` | `s96` |
+| `m` | Melody MIDI channel, `1..16` | `1` | `m2` |
+| `i` | Melody instrument, MIDI program `0..127` | Unspecified | `i60` |
+| `b` | Beats MIDI channel, `1..16` | `10` | `b10` |
+| `@` | Velocity: named dynamic or `0..100` percent | `79` percent | `@mf` |
+| `:` | Gate: articulation symbol or `0..100` percent | Full length | `:~` |
+
+Each field may occur only once in a header. Include at least one field and
+follow the header with a measure or parallel group. Headers consume no time.
+Positional fields and bare dynamics in headers are not supported; use `@mf`.
+
+### Meter
+
+A measure must have exactly the numerator's number of beats, including rests.
+In 3/4, write three beats:
+
+```text
+[t3/4@mf:~]
+[C4|D4|E4]
+```
+
+Each beat's duration comes from the denominator: a quarter note for /4,
+an eighth note for /8, and a half note for /2. A 6/8 measure therefore has
+six eighth-note beats and lasts three MIDI quarter-note units. Commas divide
+these beats equally.
+
+### Instrument
+
+Use `i60` to select MIDI program 60 on the melody channel:
+
+```text
+[i60@mf:~]
+[C4|D4|E4|F4]
+```
+
+Instrument numbers are zero-based. A new instrument setting sends a program
+change at the start of its measure. Without an instrument setting, the score
+leaves the instrument choice to your player.
+
+### Changes between measures
+
+Put a new header before a passage to change its defaults:
+
+```text
+[@p:~]
+[C4|D4|E4|F4]
+[@f]
+[G4|A4|B4|C5]
+```
+
+The second measure is louder; its gate stays at full length. Omitted fields
+retain their previous values. Prefer these passage-level changes to placing
+a velocity and gate on every note.
+
+## Dynamics and articulation
+
+### Occasional accents
+
+For a single emphasized note, use `^`:
+
+```text
+[@mf:~]
+[C4|D4|E4^|F4]
+```
+
+Only E4 receives the marcato accent: its velocity increases by 20%, capped at
+100%, and its gate becomes 70%. F4 returns to the header defaults.
+Use this for occasional accents; it is not a general replacement for an
+exact velocity or gate adjustment.
+
+### Named settings
+
+Use named dynamics in headers to set a passage's velocity:
+
+| Dynamic | Velocity (%) |
+|---|---:|
+| `ppp` | 15 |
+| `pp` | 25 |
+| `p` | 35 |
+| `mp` | 50 |
+| `mf` | 65 |
+| `f` | 80 |
+| `ff` | 90 |
+| `fff` | 100 |
+
+Use articulation symbols after the header's colon to set sounding length:
+
+| Symbol | Meaning | Gate (%) | Header |
+|---|---|---:|---|
+| `'` | Staccatissimo | 25 | `[@mf:']` |
+| `.` | Staccato | 50 | `[@mf:.]` |
+| `-` | Tenuto | 95 | `[@mf:-]` |
+| `~` | Full gate | 100 | `[@mf:~]` |
+
+Full gate does not add overlap or send a legato controller message.
+
+### Exact percentages
+
+When exact values matter, use percentages consistently for both settings:
+
+```text
+[@70:80]
+[C4|D4|E4|F4]
+```
+
+Every note has 70% velocity and sounds for 80% of its written duration.
+Readable velocity percentages are converted to MIDI's 0..127 scale.
+
+### Local exceptions
+
+Use note-level settings only when a particular event needs an exception.
+For example, shorten just E4:
+
+```text
+[@mf:~]
+[C4|D4|E4'|F4]
+```
+
+F4 returns to the header defaults. A note can also take a local dynamic,
+such as `E4p` or `E4@p`. In percentage notation, `E4@50` sets its velocity
+and `E4:60` its gate. Local modifiers apply to the complete event, including
+chord members and holds, and do not change subsequent defaults.
+
+Modifier order is note/chord, velocity, then articulation or gate.
+Choose one ending: a bare articulation, a colon gate/articulation, or `^`.
+Endings cannot be stacked; `C4:60.`, `C4:.^`, and `C4:^` are invalid.
+Keep a note and its modifiers together. Standalone modifiers and modifiers
+on holds or empty positions are invalid.
 
 ## Drum codes
 
-Drum codes use the beats channel from the header. They support the same rhythm, dynamics, articulation, and carry notation as melodic notes.
+Drum codes replace melodic notes and use the beats channel (10 by default).
+Start with a simple bass drum and snare pattern:
+
+```text
+[@mf:~]
+[BD|SD|BD|SD]
+```
+
+Drum codes do not take octaves. They support the same rhythm, holds, and
+occasional accents as notes. Join hits with `+` when they should play together:
+
+```text
+[@mf:~]
+[BD+CH|SD+CH|BD+CH|SD+CH]
+```
+
+Melodic notes can also be joined with drums, such as `C4+BD`.
+Channels use human numbering 1..16; channel 10 is the standard General MIDI
+percussion channel. Set `b` in a header for other routing.
 
 | Code | Sound | MIDI pitch |
 |---|---|---:|
@@ -254,100 +332,73 @@ Drum codes use the beats channel from the header. They support the same rhythm, 
 | `TB` | Tambourine | 54 |
 | `CB` | Cowbell | 56 |
 
-## Dynamics and articulation
+## Parallel voices
 
-Modifiers follow this order; each part except the note/chord is optional:
-
-```text
-optional ramp start, then note/chord, then optional velocity, then optional articulation/gate, then optional ramp end
-```
-
-Only chord members are joined with `+`. For example, `<C4+E4+G4` starts a crescendo on a chord; `C4mf.` plays a mezzo-forte staccato note. Choose one ending: a bare articulation, a local `:` gate or articulation, or marcato. Endings cannot be stacked: `C4:60.` and `C4:.^` are invalid.
-
-### Velocity
-
-Use `@` for a local velocity: `C4@90` uses 90%, and `SD@mf` uses mezzo-forte. Bare dynamics such as `C4p` mean the same thing as `C4@p`. All affect only their own event; subsequent events use the header defaults unless they are inside a ramp. Numeric velocities require `@`.
-
-| Dynamic | Velocity (%) |
-|---|---:|
-| `ppp` | 15 |
-| `pp` | 25 |
-| `p` | 35 |
-| `mp` | 50 |
-| `mf` | 65 |
-| `f` | 80 |
-| `ff` | 90 |
-| `fff` | 100 |
-
-### Gate and accents
-
-Gate controls sounding duration without changing the position's timing or the start of the next event. Use `:` for an exact gate or articulation: `C4:60` uses a 60% gate, and `C4:~` uses full gate. These and bare articulation symbols affect only their event.
-
-| Ending | Meaning | Gate | Example |
-|---|---|---:|---|
-| `'` | Staccatissimo | 25% | `C4'` |
-| `.` | Staccato | 50% | `C4f.` |
-| `-` | Tenuto | 95% | `C4-` |
-| `~` | Full gate (legato preset) | 100% | `C4~` |
-| `:0..100` | Local exact gate | Specified % | `C4@73:60` |
-| `^` | Marcato, this event only | 70% | `SD@75^` |
-
-Prefix any of `'`, `.`, `-`, or `~` with `:` as an alternative local spelling: `C4:'`, `C4:.`, `C4:-`, or `C4:~`. Marcato `^` is always incidental and also multiplies the event's velocity by 1.20, capped at 100%; `:^` is not supported.
-
-`~` makes the note last its full written duration; it does not add overlap or send a legato controller message. Marcato's velocity boost is applied after ramp interpolation and does not change the header velocity.
-
-### Header defaults and local overrides
-
-Only headers change velocity and gate defaults. All modifiers inside a measure
-apply to their own complete event, including chord members and carries.
+Wrap two or more measures in an outer bracket to play them simultaneously.
+Give melodic voices separate channels with `m`:
 
 ```text
-[@50:90][C4@mf:~|D4p.|E4|F4:60][G4|_|_|_]
+[@mf:~]
+[[m1][C4|D4|E4|F4][m2][C3|D3|E3|F3]]
 ```
 
-C4 uses velocity 65 and gate 100. D4 uses velocity 35 and gate 50.
-E4 returns to the header defaults, 50 and 90. F4 uses gate 60 only for
-itself; G4 uses gate 90 for its complete held duration.
+Each inner measure is one voice. A header inside the group applies only to
+the following voice. Instruments and expression defaults can differ by voice.
+Tempo and meter are shared and must be changed with an outer header.
 
-### Crescendo and diminuendo
-
-Prefix an event with `<` to start a crescendo or `>` to start a diminuendo. Place the **same marker after** a later event and all its modifiers to end it, and include a target dynamic or numeric velocity on that closing event. Velocities are interpolated over musical time.
+Consecutive groups play in order, retaining each voice's position and settings:
 
 ```text
-[4/4,120,1][<C4p|D4|E4|F4f<][>G4@80|F4|E4|C4p>]
+[@mf:~]
+[[m1][C4|D4|E4|F4][m2][C3|D3|E3|F3]]
+[[G4|A4|B4|C5][G3|A3|B3|C4]]
 ```
 
-A dynamic on the opening event sets the starting level: `<C4p` starts at piano. If omitted, the header velocity is used. A crescendo must end at an equal or higher velocity; a diminuendo at an equal or lower velocity. Missing closing markers, closing markers without a target velocity, and mismatched markers raise `ValueError`. Close the current ramp before starting another on a separate event. A prefix always opens a ramp; a suffix always closes one. For example, `C4mf'>` closes a diminuendo on a mezzo-forte staccatissimo note. Closing markers without an open ramp and nested opening markers are errors.
+Use `[]` to keep a voice's place when it is silent. Every group must keep the
+same number of voices. Holds and ramps continue independently within each
+voice. An outer header updates all voices; omitted settings retain each
+voice's existing values.
 
-Dynamics inside a ramp do not end it. They override their own event, and subsequent unmarked events continue along the ramp. For example, D4 is piano here, while E4 uses the interpolated velocity:
+Deeper nesting and mixing plain measures with parallel groups are unsupported.
+Overlapping pitches in different voices on the same channel are rejected;
+use separate channels when independent note endings are needed. All voices
+are validated before MIDI events are written.
+
+## Crescendo and diminuendo
+
+Use ramps when velocity should change gradually within a passage.
+Prefix a note with `<` to start a crescendo, then put the same marker after
+a later note with the target dynamic:
 
 ```text
-[4/4,120,1][<C4@20|D4p|E4|F4@80<]
+[@p:~]
+[<C4|D4|E4|F4f<]
 ```
 
-Opening and closing velocities are local to the ramp. After it closes, unmarked events resume the header velocity. `@` and bare dynamics have the same local scope; interior overrides never change header defaults.
-
-## Examples
-
-Save these scores as `.xdm` files and run `xdmgen`, or pass them to the Python `add_notes()` API.
-
-### Held chords
+The passage grows from the header's piano level to forte. For a diminuendo,
+use `>` at both ends:
 
 ```text
-[4/4,96,2,@60:95][C3+E3+G3|_|F3+A3+C4|_][G3+B3+D4|_|C3+E3+G3|_]
+[@f:~]
+[>G4|F4|E4|C4p>]
 ```
 
-Each chord occupies two beats and sounds for 1.9 beats (95% of two beats).
+Velocity is interpolated over musical time. A crescendo must end at an equal
+or higher velocity; a diminuendo at an equal or lower one. The opening note
+may supply its own starting dynamic. A closing marker needs a target velocity
+and comes after all note modifiers.
 
-### Jazz shuffle drums
+Close a ramp before starting another. Missing, mismatched, or nested markers
+are errors. Ramps can cross measures in the same voice. Local velocities
+inside a ramp override only their event; following notes continue the ramp.
+After the ramp closes, unmarked notes resume the header defaults. Marcato's
+boost is applied after interpolation.
 
-```text
-[4/4,120,1,10,@68:80][BD+RD,,RD|,SS+RD,|BD+RD,,RD|,SS+RD,]
-```
+## More examples
 
-Each beat has three equal positions. Empty positions provide the gaps in the shuffle.
-
-Complete XDM examples are available in [JustForYou.xdm](JustForYou.xdm) and the [generated examples directory](generated/README.md). Those files replace the old Python music examples.
+Complete scores are in the [examples directory](examples/README.md), including
+[JustForYou.xdm](examples/JustForYou.xdm). These larger arrangements combine
+the features introduced above.
 
 ## Python API
 
@@ -366,7 +417,7 @@ Import these functions from `genmidi.main` when running from the repository root
 The `track` argument is **zero-based** and independent of MIDI channels. Use a separate `add_notes()` call for each track. The optional `time` offsets notes and header metadata in quarter-note units:
 
 ```python
-add_notes(midi, 0, "[3/4,96,1][C4|D4|E4]", time=8, debug=True)
+add_notes(midi, 0, "[t3/4s96m1][C4|D4|E4]", time=8, debug=True)
 ```
 
 Parsing is quiet by default. `debug=True` prints the parsed measures and events. When combining tracks, keep simultaneous tempo and meter settings consistent because MIDI treats them as score-wide metadata.
@@ -377,7 +428,7 @@ The parser reports the errors below with `ValueError`, including unsupported acc
 
 | Problem | Fix |
 |---|---|
-| Invalid header | Use prefixed fields such as `[m1t4/4s120]` or a legacy positional header |
+| Invalid header | Use prefixed fields such as `[m1t4/4s120]` |
 | Wrong number of beats | Use exactly the meter numerator's number of beats separated by `\|`; commas subdivide each beat |
 | Missing or nested measure brackets | Put each measure in its own `[ ... ]` group |
 | Standalone `-` | Leave the position empty for a rest |

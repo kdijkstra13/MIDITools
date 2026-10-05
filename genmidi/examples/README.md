@@ -4,9 +4,9 @@ These scores replace the former Python examples. Each `.xdm` file contains
 the complete music, including simultaneous voices. From the repository root:
 
 ```sh
-xdmgen genmidi/generated/HipHop.xdm --validate
-xdmgen genmidi/generated/Cinematic2.xdm -o cinematic.mid
-xdmgen genmidi/JustForYou.xdm -o just-for-you.mid
+xdmgen genmidi/examples/HipHop.xdm --validate
+xdmgen genmidi/examples/Cinematic2.xdm -o cinematic.mid
+xdmgen genmidi/examples/JustForYou.xdm -o just-for-you.mid
 ```
 
 | File | Measures | Voices |
@@ -16,7 +16,7 @@ xdmgen genmidi/JustForYou.xdm -o just-for-you.mid
 | `HipHop.xdm` | 8 | 5 |
 | `SimpleHipHopLoop.xdm` | 4 | 1 |
 | `SimpleJazzShuffle.xdm` | 4 | 1 |
-| `../JustForYou.xdm` | 16 | 2 |
+| `JustForYou.xdm` | 16 | 2 |
 
 Inherited velocity and gate changes from the old notation are written as
 explicit local modifiers to preserve their effect. `Cinematic2.xdm` changes

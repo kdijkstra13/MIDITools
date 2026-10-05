@@ -136,7 +136,7 @@ def _midi_velocity(percent: float) -> int:
 def _parse_prefixed_header(header: str, defaults=None):
     """Read unordered, optionally comma-separated header fields."""
     token = re.compile(
-        r"(?P<field>[mbts@:])\s*(?P<value>"
+        r"(?P<field>[mbtsi@:])\s*(?P<value>"
         r"\d+\s*/\s*\d+|ppp|fff|pp|mp|mf|ff|p|f|\d+|['.~-])"
     )
     fields = {}
@@ -159,7 +159,7 @@ def _parse_prefixed_header(header: str, defaults=None):
             else:
                 raise ValueError("Timing needs a fraction, e.g. t4/4 or t12/8")
             fields[field] = tuple(map(int, parts))
-        elif field in "mbs":
+        elif field in "mbsi":
             if not value.isdigit():
                 raise ValueError(f"Header field {field!r} needs an integer")
             fields[field] = int(value)
@@ -175,7 +175,7 @@ def _parse_prefixed_header(header: str, defaults=None):
     defaults = defaults or {
         "numerator": 4, "denominator": 4, "tempo": 120,
         "channel": 0, "beats_channel": 9,
-        "velocity": DEFAULT_VELOCITY, "gate": DEFAULT_GATE,
+        "velocity": DEFAULT_VELOCITY, "gate": DEFAULT_GATE, "instrument": None,
     }
     numerator, denominator = fields.get(
         "t", (defaults["numerator"], defaults["denominator"])
@@ -183,78 +183,25 @@ def _parse_prefixed_header(header: str, defaults=None):
     return (numerator, denominator, fields.get("s", defaults["tempo"]),
             fields.get("m", defaults["channel"] + 1),
             fields.get("b", defaults["beats_channel"] + 1),
-            fields.get("@", defaults["velocity"]), fields.get(":", defaults["gate"]))
+            fields.get("@", defaults["velocity"]), fields.get(":", defaults["gate"]),
+            fields.get("i", defaults.get("instrument")))
 
 
 def _parse_single_header(notes: str, defaults=None):
-    """Parse one MML settings header.
+    """Parse prefixed settings, inheriting omitted fields from defaults.
 
-    Channels: [4/4,192,4,10,@68:80] selects melody 4 and beats 10.
-    The optional beats channel defaults to 10.
-
-    Existing form:
-        [4/4,192,4]
-
-    Extended forms with optional initial velocity and/or gate:
-        [4/4,192,4,@68:80]
-        [4/4,192,4,mf:80]
-        [4/4,192,4,@68]
-        [4/4,192,4,:80]
-
-    Fields:
-        4/4  -> time signature
-        192  -> tempo in BPM
-        4    -> melodic MIDI channel (human numbering 1..16)
-        @68  -> optional initial velocity percentage (0..100)
-        mf   -> optional named initial dynamic instead of @velocity
-        :80  -> optional initial gate percentage (0..100)
-
-    Header velocity and gate become the default values for the
-    score. All note-level modifiers override only their own event.
-
-    MIDIUtil expects the time-signature denominator as log2(denominator), so
-    the conversion happens here, at the boundary between human MML and MIDI.
+    For example, [t4/4s192m4b10i60@68:80] selects timing, channels,
+    instrument, velocity, and gate. MIDIUtil needs log2(denominator).
     """
-    match = re.match(
-        r"^\[\s*(\d+)\s*/\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
-        r"(?:\s*,\s*(\d+))?"
-        r"(?:\s*,\s*(?:@?(ppp|fff|pp|mp|mf|ff|p|f)|@(\d{1,3}))?"
-        r"\s*(?::\s*(\d{1,3}|['.~-]))?)?\s*\]",
-        notes,
-    )
-    prefixed = None
-    if not match:
-        prefixed = re.match(r"^\[\s*([mbts@:][^\[\]]*)\]", notes)
-    if not match and not prefixed:
+    match = re.match(r"^\[\s*([mbtsi@:][^\[\]]*)\]", notes)
+    if match is None:
         raise ValueError(
-            "MML must start with a header such as [4/4,192,4] "
-            "or [4/4,192,4,@70:80]"
+            "Headers require prefixed fields, e.g. [t4/4s120m1@70:80]"
         )
-
-    if prefixed:
-        numerator, denominator, tempo, channel, beats_channel, velocity, gate = (
-            _parse_prefixed_header(prefixed.group(1), defaults)
-        )
-        header_end = prefixed.end()
-    else:
-        numerator = int(match.group(1))
-        denominator = int(match.group(2))
-        tempo = int(match.group(3))
-        channel = int(match.group(4))
-        beats_channel = int(match.group(5)) if match.group(5) else 10
-        dynamic_velocity = match.group(6)
-        numeric_velocity = match.group(7)
-        gate_value = match.group(8)
-        velocity = DEFAULT_VELOCITY
-        if dynamic_velocity is not None:
-            velocity = DYNAMICS[dynamic_velocity]
-        elif numeric_velocity is not None:
-            velocity = _percentage(numeric_velocity, "velocity")
-        gate = DEFAULT_GATE
-        if gate_value is not None:
-            gate = (ARTICULATIONS[gate_value] if gate_value in ARTICULATIONS
-                    else _percentage(gate_value, "gate"))
-        header_end = match.end()
+    numerator, denominator, tempo, channel, beats_channel, velocity, gate, instrument = (
+        _parse_prefixed_header(match.group(1), defaults)
+    )
+    header_end = match.end()
 
     if numerator < 1:
         raise ValueError("Time-signature numerator must be at least 1")
@@ -267,6 +214,9 @@ def _parse_single_header(notes: str, defaults=None):
     if not 1 <= beats_channel <= 16:
         raise ValueError("Beats MIDI channel must be between 1 and 16")
 
+    if instrument is not None and not 0 <= instrument <= 127:
+        raise ValueError("MIDI instrument must be between 0 and 127")
+
     body = notes[header_end:].strip()
     measures = re.findall(r"\[([^\[\]]*)\]", body)
 
@@ -277,6 +227,7 @@ def _parse_single_header(notes: str, defaults=None):
         "tempo": tempo,
         "channel": channel - 1,
         "beats_channel": beats_channel - 1,
+        "instrument": instrument,
         "velocity": velocity,
         "gate": gate,
         "body": body,
@@ -310,7 +261,7 @@ def _bracket_groups(text):
 
 
 def _is_header(group):
-    return re.match(r"\s*(?:[mbts@:]|\d+\s*/)", group) is not None
+    return re.match(r"\s*(?:[mbtsi@:]|\d+\s*/)", group) is not None
 
 
 def _measure(group, settings):
@@ -534,17 +485,11 @@ def _resolve_ramp(v_list, t_list, start_index, start_time, start_velocity,
 def _add_voice(mf, track, header, time=0, debug=False):
     """Add an MML score with optional setting headers before measures.
 
-    Basic header syntax:
-        [numerator/denominator,tempo,channel]
-
-    Extended header syntax:
-        [numerator/denominator,tempo,channel,velocity/gate settings]
-
-    Examples:
-        [4/4,192,4]
-        [4/4,192,4,@68:80]
-        [4/4,192,4,mf:80]
-        [4/4,192,4,:80]
+    Header fields use prefixes in any order, with optional commas/spaces:
+        [t4/4s192m4]
+        [m4b10i60@68:80]
+        [@mf:80]
+        [:80]
 
     Optional headers before measures change defaults. Note-level modifiers
     apply only to the complete event, including carries.
@@ -553,8 +498,8 @@ def _add_voice(mf, track, header, time=0, debug=False):
     quarter-note units for /4, eighth-note units for /8, half-note units for
     /2, and so on.
 
-    An optional beats channel follows the melodic channel, e.g.
-    [4/4,120,1,10,@68:80]. Both channels use human numbering 1..16.
+    Select melody and beats channels with m and b, e.g. [m1b10@68:80].
+    Both channels use human numbering 1..16.
     Omitted beats channels default to 10.
 
     Use '_' to carry/hold the complete previous event, including drum hits,
@@ -615,6 +560,13 @@ def _add_voice(mf, track, header, time=0, debug=False):
                     denominator=header["midi_denominator"],
                     clocks_per_tick=32, notes_per_quarter=8,
                 )
+        if header["instrument"] is not None and (
+            previous_header is None
+            or (header["channel"], header["instrument"]) !=
+               (previous_header["channel"], previous_header["instrument"])
+        ):
+            mf.addProgramChange(track=track, channel=melodic_channel,
+                                time=time + tick, program=header["instrument"])
         previous_header = header
         if debug:
             print(f"measure: {measure}")
@@ -783,6 +735,9 @@ def parse_xdm(notes: str, track=0, time=0, debug=False):
         def addTimeSignature(self, **values):
             self.calls.append(("addTimeSignature", values))
 
+        def addProgramChange(self, **values):
+            self.calls.append(("addProgramChange", values))
+
         def addNote(self, **values):
             self.calls.append(("addNote", values))
 
@@ -804,7 +759,7 @@ def parse_xdm(notes: str, track=0, time=0, debug=False):
                             "use separate melody or beats channels"
                         )
                 voice_notes.setdefault(key, []).append((begin, end))
-            if voice_index == 0 or method == "addNote":
+            if voice_index == 0 or method in ("addNote", "addProgramChange"):
                 all_calls.append((method, values))
         for key, intervals in voice_notes.items():
             previous_notes.setdefault(key, []).extend(intervals)

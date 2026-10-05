@@ -9,6 +9,10 @@ class RecordingMIDI:
         self.notes = []
         self.tempos = []
         self.meters = []
+        self.programs = []
+
+    def addProgramChange(self, **values):
+        self.programs.append(values)
 
     def addNote(self, **values):
         self.notes.append(values)
@@ -24,12 +28,27 @@ class HeaderTests(unittest.TestCase):
     def parse(self, header, measure="[C4|D4|E4|F4]"):
         return _parse_header(header + measure)
 
-    def test_equivalent_spellings_and_legacy(self):
-        expected = self.parse("[4/4,120,2,10,@mf:-]")
+    def test_equivalent_prefixed_spellings(self):
+        expected = self.parse("[t4/4s120m2b10@mf:-]")
         for header in ("[m2,b10,t4/4,@mf,:-]", "[m2b10t4/4@mf:-]",
                        "[:- @mf s120 t4/4 b10 m2]"):
             with self.subTest(header=header):
                 self.assertEqual(self.parse(header), expected)
+
+    def test_positional_headers_are_rejected(self):
+        for header in ("[4/4,120,2]", "[4/4,120,2,10]",
+                       "[4/4,120,2,@mf:80]", "[4/4,120,2,:80]"):
+            scores = (header + "[C4|D4|E4|F4]",
+                      "[C4|D4|E4|F4]" + header + "[C4|D4|E4|F4]",
+                      "[" + header + "[C4|D4|E4|F4][m3][C3|D3|E3|F3]]")
+            for score in scores:
+                midi = RecordingMIDI()
+                with self.subTest(score=score), self.assertRaisesRegex(
+                        ValueError, "prefixed fields"):
+                    add_notes(midi, 0, score)
+                self.assertEqual(midi.notes, [])
+                self.assertEqual(midi.tempos, [])
+                self.assertEqual(midi.programs, [])
 
     def test_numeric_expression(self):
         result = self.parse("[m2b10t4/4@20:80]")
@@ -53,6 +72,32 @@ class HeaderTests(unittest.TestCase):
                        "[m2junk]", "[mp]", "[sfast]", "[t4/4@mf@20]"):
             with self.subTest(header=header), self.assertRaises(ValueError):
                 self.parse(header)
+
+    def test_instruments(self):
+        midi = RecordingMIDI()
+        add_notes(midi, 2, "[i60m2][C4|D4|E4|F4]"
+                  "[@70][C4|D4|E4|F4][i0m3][C4|D4|E4|F4]", time=3)
+        self.assertEqual(midi.programs, [
+            dict(track=2, channel=1, time=3, program=60),
+            dict(track=2, channel=2, time=11, program=0),
+        ])
+        self.assertEqual(self.parse("[i127]")["instrument"], 127)
+        self.assertEqual(self.parse("[m2,i60]")["instrument"], 60)
+
+    def test_parallel_instruments(self):
+        midi = RecordingMIDI()
+        add_notes(midi, 0, "[[m1i60][C4|D4|E4|F4]"
+                  "[m2i127][C3|D3|E3|F3]]")
+        self.assertEqual([p["program"] for p in midi.programs], [60, 127])
+        self.assertEqual([p["channel"] for p in midi.programs], [0, 1])
+
+    def test_invalid_instruments(self):
+        for header in ("[i128]", "[i-1]", "[i60i61]", "[imf]", "[i1/2]"):
+            midi = RecordingMIDI()
+            with self.subTest(header=header), self.assertRaises(ValueError):
+                add_notes(midi, 0, header + "[C4|D4|E4|F4]")
+            self.assertEqual(midi.programs, [])
+            self.assertEqual(midi.notes, [])
 
     def test_measure_validation(self):
         with self.assertRaises(ValueError):
